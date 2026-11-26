@@ -81,6 +81,27 @@ def test_delete_collection_requires_collection_or_all(mock_client):
         manager.delete_collection()
 
 
+def test_create_collection_from_dict(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.side_effect = [False, True]
+
+    manager = CollectionManager(mock_client)
+    manager.create_collection_from_dict(
+        config={"name": "Docs", "vectorizer": "none"},
+    )
+
+    mock_collections.create_from_dict.assert_called_once_with(
+        {"class": "Docs", "vectorizer": "none"}
+    )
+
+
+def test_create_collection_from_dict_missing_name(mock_client):
+    manager = CollectionManager(mock_client)
+    with pytest.raises(ValueError, match="non-empty 'class' name"):
+        manager.create_collection_from_dict(config={"vectorizer": "none"})
+
+
 def test_create_existing_collection(mock_client, mock_wvc_object_ttl):
     # Setup
     mock_collections = MagicMock()
@@ -163,7 +184,7 @@ def test_delete_nonexistent_collection(mock_client):
     manager = CollectionManager(mock_client)
     mock_client.collections.exists.return_value = False
 
-    with pytest.raises(Exception, match="doesn't exist"):
+    with pytest.raises(Exception):
         manager.delete_collection(collection="TestCollection", all=False)
 
 

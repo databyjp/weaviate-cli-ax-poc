@@ -15,10 +15,7 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - [x] Drop heavy dependencies (`numpy`, `faker`, `matplotlib`) from `setup.cfg` and clean up removed tests/imports.
 
 ### Migrate to `noun-verb` admin and DDL command tree
-- [ ] Reorganize commands into `noun-verb` groups with `kebab-case` flags (no backwards-compatible `verb-noun` aliases):
-  - **Lifecycle:**
-    - `local`: `start`, `stop`, `status`, `destroy`
-    - `cloud`: `install-wcloud`, `auth-status`, `regions`, `create`, `list`, `get`, `status`
+- [x] Reorganize existing admin and DDL commands into `noun-verb` groups with `kebab-case` flags (no backwards-compatible `verb-noun` aliases):
   - **DDL and data organization:**
     - `collection`: `create` (via `--from-file` / `--from-json` using `create_from_dict(...)` or lightweight `--property` flags), `list`, `get`, `update`, `delete`
     - `tenant`: `create`, `list`, `get`, `update`, `delete` (explicit tenant names, no 100-tenant QA generator default)
@@ -29,13 +26,9 @@ Active checklist, command specifications, and dated progress log for the `weavia
     - `replication`: `create`, `list`, `get`, `cancel`, `delete`
     - `backup`: `create`, `get`, `restore`, `cancel`
     - `export`: `create`, `get`, `cancel`
-    - `role`: `create`, `list`, `get`, `delete`, `assign`, `revoke`
+    - `role`: `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission`
     - `user`: `create`, `list`, `get`, `update`, `delete`
-  - **Diagnostics and surface glue:**
-    - `status`
-    - `config`: `show`, `use`, `test`
-    - `mcp`: `config`
-    - `guide`
+  - *(Lifecycle `local`/`cloud` and diagnostics/glue `status`/`config`/`mcp`/`guide` are tracked in [Implement lifecycle, diagnostics, and surface glue](#implement-lifecycle-diagnostics-and-surface-glue).)*
 
 ### Harden AX contracts
 - [ ] Route all errors, warnings, and progress messages strictly to `stderr` (`err=True`); keep `stdout` strictly for command output (including removing `stdout` gRPC warnings in `ConfigManager`).
@@ -88,3 +81,4 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - Replaced Black with Ruff for local formatting and pre-commit checks. Added `make lint` for read-only lint and format checks and `make typecheck` for Pyright across the CLI and tests.
 - Resolved all 121 Pyright errors without raising the SDK minimum. Fixes included stale collection config annotations, shell completion without `--config-file`, and collection listing for vectorizers the SDK returns as plain strings. All 286 existing unit tests passed; no new tests were added.
 - Configured GitHub Actions to run `make lint` and `make typecheck` before the test jobs on pull requests and pushes to `main`. Removed Black's dependency and configuration. Both checks passed locally; the release workflow was unchanged.
+- Migrated all existing admin and DDL commands to `noun-verb` groups (`collection`, `tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`) with `kebab-case` flags and no legacy `verb-noun` aliases. Redesigned `collection create` with `--from-file`/`--from-json` (`create_from_dict`) and `--property name:type`, and required explicit tenant names across `tenant` commands.

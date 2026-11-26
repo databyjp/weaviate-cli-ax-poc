@@ -3,7 +3,6 @@ import json
 import click
 import semver
 from weaviate import WeaviateClient
-from weaviate.collections import Collection
 from weaviate.collections.classes.tenants import Tenant, TenantActivityStatus
 
 from weaviate_cli.defaults import (
@@ -20,7 +19,7 @@ class TenantManager:
 
     def create_tenants(
         self,
-        collection: str | None = CreateTenantsDefaults.collection,
+        collection: str = CreateTenantsDefaults.collection,
         tenant_suffix: str = CreateTenantsDefaults.tenant_suffix,
         number_tenants: int = CreateTenantsDefaults.number_tenants,
         tenant_batch_size: int | None = CreateTenantsDefaults.tenant_batch_size,
@@ -44,17 +43,17 @@ class TenantManager:
             Exception: If the collection does not exist or multi-tenancy is not enabled.
         """
 
-        if not collection or not self.client.collections.exists(collection):
+        if not self.client.collections.exists(collection):
             raise Exception(
                 f"Class '{collection}' does not exist in Weaviate. Create first using <create class>"
             )
 
         version = semver.Version.parse(self.client.get_meta()["version"])
-        col_obj = self.client.collections.get(collection)
+        collection = self.client.collections.get(collection)
 
-        if not col_obj.config.get().multi_tenancy_config.enabled:
+        if not collection.config.get().multi_tenancy_config.enabled:
             raise Exception(
-                f"Collection '{col_obj.name}' does not have multi-tenancy enabled. Recreate or modify the class with: <create class>"
+                f"Collection '{collection.name}' does not have multi-tenancy enabled. Recreate or modify the class with: <create class>"
             )
 
         tenant_state_map = {
@@ -67,7 +66,7 @@ class TenantManager:
         }
 
         # Fetch existing tenants once to avoid redundant network calls
-        existing_tenants = col_obj.tenants.get()
+        existing_tenants = collection.tenants.get()
 
         # Resolve tenant names to create
         new_tenant_names = self._resolve_tenant_names_to_create(
@@ -95,25 +94,27 @@ class TenantManager:
                         {
                             "status": "success",
                             "tenants_created": 0,
-                            "message": f"No new tenants to create for collection '{col_obj.name}'",
+                            "message": f"No new tenants to create for collection '{collection.name}'",
                         }
                     )
                 )
             else:
-                click.echo(f"No new tenants to create for collection '{col_obj.name}'")
+                click.echo(
+                    f"No new tenants to create for collection '{collection.name}'"
+                )
             return
 
         # Create tenants (in batches if specified)
         if tenant_batch_size:
             for i in range(0, len(tenants), tenant_batch_size):
                 batch = tenants[i : i + tenant_batch_size]
-                col_obj.tenants.create(batch)
+                collection.tenants.create(batch)
         else:
-            col_obj.tenants.create(tenants)
+            collection.tenants.create(tenants)
 
         # Verify creation
         self._verify_tenant_creation(
-            col_obj=col_obj,
+            collection=collection,
             version=version,
             new_tenant_names=new_tenant_names,
             expected_status=tenant_state_map[state],
@@ -125,13 +126,13 @@ class TenantManager:
                     {
                         "status": "success",
                         "tenants_created": len(new_tenant_names),
-                        "message": f"{len(new_tenant_names)} tenants added with status '{tenant_state_map[state]}' for collection '{col_obj.name}'",
+                        "message": f"{len(new_tenant_names)} tenants added with status '{tenant_state_map[state]}' for collection '{collection.name}'",
                     }
                 )
             )
         else:
             click.echo(
-                f"{len(new_tenant_names)} tenants added with status '{tenant_state_map[state]}' for collection '{col_obj.name}'"
+                f"{len(new_tenant_names)} tenants added with status '{tenant_state_map[state]}' for collection '{collection.name}'"
             )
 
     def _resolve_tenant_names_to_create(
@@ -173,7 +174,7 @@ class TenantManager:
 
     def _verify_tenant_creation(
         self,
-        col_obj: Collection,
+        collection,
         version: semver.Version,
         new_tenant_names: list[str],
         expected_status: TenantActivityStatus,
@@ -182,11 +183,11 @@ class TenantManager:
         if version.compare(semver.Version.parse("1.25.0")) < 0:
             created_tenants = {
                 name: tenant
-                for name, tenant in col_obj.tenants.get().items()
+                for name, tenant in collection.tenants.get().items()
                 if name in new_tenant_names
             }
         else:
-            created_tenants = col_obj.tenants.get_by_names(new_tenant_names)
+            created_tenants = collection.tenants.get_by_names(new_tenant_names)
 
         if len(created_tenants) != len(new_tenant_names):
             missing = set(new_tenant_names) - set(created_tenants.keys())
@@ -202,7 +203,7 @@ class TenantManager:
 
     def delete_tenants(
         self,
-        collection: str | None = DeleteTenantsDefaults.collection,
+        collection: str = DeleteTenantsDefaults.collection,
         tenant_suffix: str = DeleteTenantsDefaults.tenant_suffix,
         number_tenants: int = DeleteTenantsDefaults.number_tenants,
         tenants_list: list | None = DeleteTenantsDefaults.tenants,
@@ -221,37 +222,37 @@ class TenantManager:
                        no tenants are present, or if there is a failure in deleting tenants.
         """
 
-        if not collection or not self.client.collections.exists(collection):
+        if not self.client.collections.exists(collection):
             raise Exception(
                 f"Class '{collection}' does not exist in Weaviate. Create first using <create class> command"
             )
 
-        col_obj = self.client.collections.get(collection)
+        collection = self.client.collections.get(collection)
 
-        if not col_obj.config.get().multi_tenancy_config.enabled:
+        if not collection.config.get().multi_tenancy_config.enabled:
             raise Exception(
-                f"Collection '{col_obj.name}' does not have multi-tenancy enabled. Recreate or modify the class with <create class> command"
+                f"Collection '{collection.name}' does not have multi-tenancy enabled. Recreate or modify the class with <create class> command"
             )
 
         try:
             if tenants_list:
-                deleting_tenants = col_obj.tenants.get_by_names(tenants_list)
+                deleting_tenants = collection.tenants.get_by_names(tenants_list)
             else:
                 if tenant_suffix == "*":
                     if not json_output:
                         click.echo(
-                            f"Deleting {number_tenants} existing tenants from {col_obj.name} (not taking into account the tenant suffix)"
+                            f"Deleting {number_tenants} existing tenants from {collection.name} (not taking into account the tenant suffix)"
                         )
-                    tenants_list_with_suffix = col_obj.tenants.get()
+                    tenants_list_with_suffix = collection.tenants.get()
                 else:
                     tenants_list_with_suffix = {
                         name: tenant
-                        for name, tenant in col_obj.tenants.get().items()
+                        for name, tenant in collection.tenants.get().items()
                         if name.startswith(tenant_suffix)
                     }
                 total_tenants = len(tenants_list_with_suffix)
                 if total_tenants == 0:
-                    raise Exception(f"No tenants present in class {col_obj.name}.")
+                    raise Exception(f"No tenants present in class {collection.name}.")
 
                 if number_tenants < total_tenants:
                     deleting_tenants = dict(
@@ -261,18 +262,17 @@ class TenantManager:
                     deleting_tenants = tenants_list_with_suffix
 
             if not deleting_tenants:
-                raise Exception(f"No tenants present in class {col_obj.name}.")
+                raise Exception(f"No tenants present in class {collection.name}.")
             else:
-                col_obj.tenants.remove(list(deleting_tenants.values()))
+                collection.tenants.remove(list(deleting_tenants.values()))
 
         except Exception as e:
             raise Exception(f"Failed to delete tenants: {e}")
 
         # Verify deletion
-        remaining = col_obj.tenants.get_by_names(list(deleting_tenants.keys()))
+        remaining = collection.tenants.get_by_names(list(deleting_tenants.keys()))
         assert len(remaining) == 0, (
-            f"Expected all {len(deleting_tenants)} tenants to be deleted, "
-            f"but {len(remaining)} still exist"
+            f"Expected all {len(deleting_tenants)} tenants to be deleted, but {len(remaining)} still exist"
         )
 
         if json_output:
@@ -291,7 +291,7 @@ class TenantManager:
 
     def get_tenants(
         self,
-        collection: str | None = GetTenantsDefaults.collection,
+        collection: str = GetTenantsDefaults.collection,
         tenant_id: str | None = GetTenantsDefaults.tenant_id,
         verbose: bool = GetTenantsDefaults.verbose,
         json_output: bool = False,
@@ -310,8 +310,6 @@ class TenantManager:
         Raises:
             Exception: If the collection does not exist or multi-tenancy is not enabled.
         """
-        if not collection:
-            raise ValueError("Collection name is required.")
         if tenant_id:
             tenants = self.client.collections.get(collection).tenants.get_by_names(
                 [tenant_id]
@@ -390,7 +388,7 @@ class TenantManager:
 
     def update_tenants(
         self,
-        collection: str | None = UpdateTenantsDefaults.collection,
+        collection: str = UpdateTenantsDefaults.collection,
         tenant_suffix: str = UpdateTenantsDefaults.tenant_suffix,
         number_tenants: int = UpdateTenantsDefaults.number_tenants,
         state: str = UpdateTenantsDefaults.state,
@@ -417,17 +415,17 @@ class TenantManager:
             None
         """
 
-        if not collection or not self.client.collections.exists(collection):
+        if not self.client.collections.exists(collection):
             raise Exception(
                 f"Class '{collection}' does not exist in Weaviate. Create first using ./create_class.py"
             )
 
         version = semver.Version.parse(self.client.get_meta()["version"])
-        col_obj = self.client.collections.get(collection)
+        collection = self.client.collections.get(collection)
 
-        if not col_obj.config.get().multi_tenancy_config.enabled:
+        if not collection.config.get().multi_tenancy_config.enabled:
             raise Exception(
-                f"Collection '{col_obj.name}' does not have multi-tenancy enabled. Recreate or modify the class with ./create_class.py"
+                f"Collection '{collection.name}' does not have multi-tenancy enabled. Recreate or modify the class with ./create_class.py"
             )
 
         tenant_state_map = {
@@ -451,17 +449,17 @@ class TenantManager:
         if tenants is None:
             tenants_with_suffix = {
                 name: tenant
-                for name, tenant in col_obj.tenants.get().items()
+                for name, tenant in collection.tenants.get().items()
                 if name.startswith(tenant_suffix)
             }
 
         if tenants is None and len(tenants_with_suffix) < number_tenants:
             raise Exception(
-                f"Not enough tenants present in class {col_obj.name} with suffix {tenant_suffix}. Expected {number_tenants}, found {len(tenants_with_suffix)}."
+                f"Not enough tenants present in class {collection.name} with suffix {tenant_suffix}. Expected {number_tenants}, found {len(tenants_with_suffix)}."
             )
         if tenants:
             # Update only the specified tenants passed via arguments.
-            existing_tenants = col_obj.tenants.get_by_names(
+            existing_tenants = collection.tenants.get_by_names(
                 [t.strip() for t in tenants.split(",") if t.strip()]
             )
         else:
@@ -477,26 +475,30 @@ class TenantManager:
         ]
         if not tenants_to_update:
             raise Exception(
-                f"No matching tenants found in collection '{col_obj.name}' to update."
+                f"No matching tenants found in collection '{collection.name}' to update."
             )
-        col_obj.tenants.update(tenants_to_update)
+        collection.tenants.update(tenants_to_update)
 
         # get_by_names is only available after 1.25.0
         if version.compare(semver.Version.parse("1.25.0")) < 0:
             tenants_list = {
                 name: tenant
-                for name, tenant in col_obj.tenants.get().items()
-                if name in existing_tenants
+                for name, tenant in collection.tenants.get().items()
+                if name in existing_tenants.keys()
             }
         else:
-            tenants_list = col_obj.tenants.get_by_names(list(existing_tenants))
+            tenants_list = collection.tenants.get_by_names(
+                [name for name in existing_tenants.keys()]
+            )
         if tenants is None:
-            expected = number_tenants
+            assert len(tenants_list) == number_tenants, (
+                f"Expected {number_tenants} tenants, but found {len(tenants_list)}"
+            )
         else:
             clean = [t.strip() for t in tenants.split(",") if t.strip()]
-            expected = len(clean)
-        actual = len(tenants_list)
-        assert actual == expected, f"Expected {expected} tenants, but found {actual}"
+            assert len(tenants_list) == len(clean), (
+                f"Expected {len(clean)} tenants, but found {len(tenants_list)}"
+            )
         for tenant in tenants_list.values():
             if tenant.activity_status != equivalent_state_map[state]:
                 raise Exception(
@@ -508,12 +510,12 @@ class TenantManager:
                     {
                         "status": "success",
                         "tenants_updated": len(tenants_list),
-                        "message": f"{len(tenants_list)} tenants updated with tenant status '{tenant.activity_status}' for class '{col_obj.name}'.",
+                        "message": f"{len(tenants_list)} tenants updated with tenant status '{tenant.activity_status}' for class '{collection.name}'.",
                     },
                     indent=2,
                 )
             )
         else:
             click.echo(
-                f"{len(tenants_list)} tenants updated with tenant status '{tenant.activity_status}' for class '{col_obj.name}'."
+                f"{len(tenants_list)} tenants updated with tenant status '{tenant.activity_status}' for class '{collection.name}'."
             )

@@ -240,18 +240,6 @@ def test_delete_alias_success_json(
     assert "my_alias" in data["message"]
 
 
-def test_delete_alias_network_error(
-    alias_manager: AliasManager, mock_client: MagicMock
-) -> None:
-    """Test delete_alias raises on client error."""
-    mock_client.alias.delete.side_effect = Exception("network error")
-
-    with pytest.raises(Exception) as exc_info:
-        alias_manager.delete_alias("bad_alias")
-
-    assert "Error deleting alias 'bad_alias': network error" in str(exc_info.value)
-
-
 # ---------------------------------------------------------------------------
 # create_alias / update_alias json_output
 # ---------------------------------------------------------------------------

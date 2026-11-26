@@ -17,15 +17,16 @@ import sys
 import click
 
 from weaviate_cli import __version__
-from weaviate_cli.commands.assign import assign
-from weaviate_cli.commands.cancel import cancel
-from weaviate_cli.commands.create import create
-from weaviate_cli.commands.delete import delete
-from weaviate_cli.commands.get import get
-from weaviate_cli.commands.query import query
-from weaviate_cli.commands.restore import restore
-from weaviate_cli.commands.revoke import revoke
-from weaviate_cli.commands.update import update
+from weaviate_cli.commands.alias import alias_group
+from weaviate_cli.commands.backup import backup_group
+from weaviate_cli.commands.collection import collection_group
+from weaviate_cli.commands.export import export_group
+from weaviate_cli.commands.node import node_group
+from weaviate_cli.commands.replication import replication_group
+from weaviate_cli.commands.role import role_group
+from weaviate_cli.commands.shard import shard_group
+from weaviate_cli.commands.tenant import tenant_group
+from weaviate_cli.commands.user import user_group
 from weaviate_cli.managers.config_manager import ConfigManager
 
 
@@ -68,15 +69,16 @@ def main(ctx: click.Context, config_file: str | None, user: str | None):
         sys.exit(1)
 
 
-main.add_command(create)
-main.add_command(delete)
-main.add_command(get)
-main.add_command(update)
-main.add_command(restore)
-main.add_command(query)
-main.add_command(cancel)
-main.add_command(assign)
-main.add_command(revoke)
+main.add_command(collection_group)
+main.add_command(tenant_group)
+main.add_command(alias_group)
+main.add_command(node_group)
+main.add_command(shard_group)
+main.add_command(replication_group)
+main.add_command(backup_group)
+main.add_command(export_group)
+main.add_command(role_group)
+main.add_command(user_group)
 
 if __name__ == "__main__":
     main()

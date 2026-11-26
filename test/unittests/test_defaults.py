@@ -5,25 +5,22 @@ import pytest
 from click.testing import CliRunner
 from weaviate.collections.classes.tenants import TenantActivityStatus
 
-from weaviate_cli.commands.create import (
+from weaviate_cli.commands.backup import (
     create_backup_cli,
-    create_collection_cli,
-    create_tenants_cli,
-)
-from weaviate_cli.commands.delete import (
-    delete_collection_cli,
-    delete_tenants_cli,
-)
-from weaviate_cli.commands.get import (
     get_backup_cli,
-    get_collection_cli,
-    get_shards_cli,
-    get_tenants_cli,
+    restore_backup_cli,
 )
-from weaviate_cli.commands.restore import restore_backup_cli
-from weaviate_cli.commands.update import (
+from weaviate_cli.commands.collection import (
+    create_collection_cli,
+    delete_collection_cli,
+    list_collections_cli,
     update_collection_cli,
-    update_shards_cli,
+)
+from weaviate_cli.commands.shard import list_shards_cli, update_shards_cli
+from weaviate_cli.commands.tenant import (
+    create_tenants_cli,
+    delete_tenants_cli,
+    list_tenants_cli,
     update_tenants_cli,
 )
 from weaviate_cli.defaults import (
@@ -57,13 +54,11 @@ def test_create_collection_defaults(runner):
     mock_client.collections.exists.side_effect = [False, True]
     ctx.obj["config"].get_client.return_value = mock_client
 
-    # Omitting --collection must fail (no implicit "Movies" default)
+    # Omitting NAME (without --from-file/--from-json) must fail
     missing_result = runner.invoke(create_collection_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(
-        create_collection_cli, ["--collection", "TestCollection"], obj=ctx.obj
-    )
+    result = runner.invoke(create_collection_cli, ["TestCollection"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert CreateCollectionDefaults.collection is None
     assert CreateCollectionDefaults.replication_factor == 1
@@ -91,25 +86,22 @@ def test_create_tenants_defaults(runner):
     mock_collection.config.get.return_value = mock_config
 
     mock_collection.tenants.get.return_value = {}
-    mock_tenants = {
-        f"{CreateTenantsDefaults.tenant_suffix}-{i}": MagicMock(
-            activity_status=TenantActivityStatus.ACTIVE
-        )
-        for i in range(CreateTenantsDefaults.number_tenants)
+    mock_collection.tenants.get_by_names.return_value = {
+        "tenant-a": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
+        "tenant-b": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
     }
-    mock_collection.tenants.get_by_names.return_value = mock_tenants
     ctx.obj["config"].get_client.return_value = mock_client
 
     missing_result = runner.invoke(create_tenants_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
     result = runner.invoke(
-        create_tenants_cli, ["--collection", "TestCollection"], obj=ctx.obj
+        create_tenants_cli,
+        ["--collection", "TestCollection", "tenant-a", "tenant-b"],
+        obj=ctx.obj,
     )
     assert result.exit_code == 0, result.output
     assert CreateTenantsDefaults.collection is None
-    assert CreateTenantsDefaults.tenant_suffix == "Tenant"
-    assert CreateTenantsDefaults.number_tenants == 100
     assert CreateTenantsDefaults.state == "active"
 
 
@@ -141,13 +133,11 @@ def test_delete_collection_defaults(runner):
     mock_client.collections.exists.side_effect = [True, False]
     ctx.obj["config"].get_client.return_value = mock_client
 
-    # Omitting both --collection and --all must fail
+    # Omitting both NAME and --all must fail
     missing_result = runner.invoke(delete_collection_cli, obj=ctx.obj)
-    assert missing_result.exit_code == 1
+    assert missing_result.exit_code == 2
 
-    result = runner.invoke(
-        delete_collection_cli, ["--collection", "TestCollection"], obj=ctx.obj
-    )
+    result = runner.invoke(delete_collection_cli, ["TestCollection"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert DeleteCollectionDefaults.collection is None
     assert DeleteCollectionDefaults.all is False
@@ -167,46 +157,44 @@ def test_delete_tenants_defaults(runner):
     mock_config.multi_tenancy_config.enabled = True
     mock_collection.config.get.return_value = mock_config
 
-    mock_tenants = {
-        f"{DeleteTenantsDefaults.tenant_suffix}-{i}": MagicMock()
-        for i in range(1, DeleteTenantsDefaults.number_tenants + 1)
-    }
-    mock_collection.tenants.get.side_effect = [mock_tenants, {}]
-
+    mock_collection.tenants.get_by_names.side_effect = [
+        {"tenant-a": MagicMock()},
+        {},
+    ]
     ctx.obj["config"].get_client.return_value = mock_client
 
     missing_result = runner.invoke(delete_tenants_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
     result = runner.invoke(
-        delete_tenants_cli, ["--collection", "TestCollection"], obj=ctx.obj
+        delete_tenants_cli,
+        ["--collection", "TestCollection", "tenant-a"],
+        obj=ctx.obj,
     )
     assert result.exit_code == 0, result.output
     assert DeleteTenantsDefaults.collection is None
-    assert DeleteTenantsDefaults.tenant_suffix == "Tenant"
-    assert DeleteTenantsDefaults.number_tenants == 100
 
 
 def test_get_collection_defaults(runner):
-    ctx = click.Context(get_collection_cli)
+    ctx = click.Context(list_collections_cli)
     ctx.obj = {"config": MagicMock()}
     ctx.obj["config"].get_client = MagicMock()
 
-    result = runner.invoke(get_collection_cli, obj=ctx.obj)
+    result = runner.invoke(list_collections_cli, obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert GetCollectionDefaults.collection is None
 
 
 def test_get_tenants_defaults(runner):
-    ctx = click.Context(get_tenants_cli)
+    ctx = click.Context(list_tenants_cli)
     ctx.obj = {"config": MagicMock()}
     ctx.obj["config"].get_client = MagicMock()
 
-    missing_result = runner.invoke(get_tenants_cli, obj=ctx.obj)
+    missing_result = runner.invoke(list_tenants_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
     result = runner.invoke(
-        get_tenants_cli, ["--collection", "TestCollection"], obj=ctx.obj
+        list_tenants_cli, ["--collection", "TestCollection"], obj=ctx.obj
     )
     assert result.exit_code == 0, result.output
     assert GetTenantsDefaults.collection is None
@@ -214,11 +202,11 @@ def test_get_tenants_defaults(runner):
 
 
 def test_get_shards_defaults(runner):
-    ctx = click.Context(get_shards_cli)
+    ctx = click.Context(list_shards_cli)
     ctx.obj = {"config": MagicMock()}
     ctx.obj["config"].get_client = MagicMock()
 
-    result = runner.invoke(get_shards_cli, obj=ctx.obj)
+    result = runner.invoke(list_shards_cli, obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert GetShardsDefaults.collection is None
 
@@ -235,7 +223,7 @@ def test_get_backup_defaults(runner):
     client.backup = backup_manager
     ctx.obj["config"].get_client.return_value = client
 
-    result = runner.invoke(get_backup_cli, ["--backup_id", "test-backup"], obj=ctx.obj)
+    result = runner.invoke(get_backup_cli, ["test-backup"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert GetBackupDefaults.backend == "s3"
     assert GetBackupDefaults.backup_id is None
@@ -277,9 +265,7 @@ def test_update_collection_defaults(runner):
     missing_result = runner.invoke(update_collection_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(
-        update_collection_cli, ["--collection", "TestCollection"], obj=ctx.obj
-    )
+    result = runner.invoke(update_collection_cli, ["TestCollection"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert UpdateCollectionDefaults.collection is None
     assert UpdateCollectionDefaults.object_ttl_property_name is None
@@ -308,12 +294,8 @@ def test_update_tenants_defaults(runner):
     mock_collection.config.get.return_value = mock_config
 
     mock_tenants = {
-        f"{UpdateTenantsDefaults.tenant_suffix}-{i}": MagicMock(
-            activity_status=TenantActivityStatus.ACTIVE
-        )
-        for i in range(UpdateTenantsDefaults.number_tenants)
+        "tenant-a": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
     }
-    mock_collection.tenants.get.return_value = mock_tenants
     mock_collection.tenants.get_by_names.return_value = mock_tenants
     ctx.obj["config"].get_client.return_value = mock_client
 
@@ -321,12 +303,12 @@ def test_update_tenants_defaults(runner):
     assert missing_result.exit_code == 2
 
     result = runner.invoke(
-        update_tenants_cli, ["--collection", "TestCollection"], obj=ctx.obj
+        update_tenants_cli,
+        ["--collection", "TestCollection", "--state", "active", "tenant-a"],
+        obj=ctx.obj,
     )
     assert result.exit_code == 0, result.output
     assert UpdateTenantsDefaults.collection is None
-    assert UpdateTenantsDefaults.tenant_suffix == "Tenant"
-    assert UpdateTenantsDefaults.number_tenants == 100
     assert UpdateTenantsDefaults.state == "active"
 
 

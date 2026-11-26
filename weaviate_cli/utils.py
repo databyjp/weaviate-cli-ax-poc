@@ -10,7 +10,51 @@ from collections.abc import Callable, Sequence
 import click
 import semver
 import weaviate
+import weaviate.classes.config as wvc
 from weaviate.rbac.models import Permissions, PermissionsCreateType, RoleScope
+
+PROPERTY_DATA_TYPE_MAP: dict[str, wvc.DataType] = {
+    "text": wvc.DataType.TEXT,
+    "text[]": wvc.DataType.TEXT_ARRAY,
+    "int": wvc.DataType.INT,
+    "int[]": wvc.DataType.INT_ARRAY,
+    "bool": wvc.DataType.BOOL,
+    "boolean": wvc.DataType.BOOL,
+    "bool[]": wvc.DataType.BOOL_ARRAY,
+    "boolean[]": wvc.DataType.BOOL_ARRAY,
+    "number": wvc.DataType.NUMBER,
+    "number[]": wvc.DataType.NUMBER_ARRAY,
+    "date": wvc.DataType.DATE,
+    "date[]": wvc.DataType.DATE_ARRAY,
+    "uuid": wvc.DataType.UUID,
+    "uuid[]": wvc.DataType.UUID_ARRAY,
+    "geo": wvc.DataType.GEO_COORDINATES,
+    "geocoordinates": wvc.DataType.GEO_COORDINATES,
+    "blob": wvc.DataType.BLOB,
+    "phone": wvc.DataType.PHONE_NUMBER,
+    "phonenumber": wvc.DataType.PHONE_NUMBER,
+    "object": wvc.DataType.OBJECT,
+    "object[]": wvc.DataType.OBJECT_ARRAY,
+}
+
+
+def parse_property_spec(spec: str) -> wvc.Property:
+    """Parse a 'name:type' property specification into a Weaviate Property."""
+    if ":" not in spec:
+        raise ValueError(
+            f"Invalid property format: '{spec}'. Expected 'name:type' (e.g. 'title:text')."
+        )
+    name, raw_type = spec.split(":", 1)
+    name = name.strip()
+    type_key = raw_type.strip().lower()
+    if not name:
+        raise ValueError(f"Invalid property format: '{spec}'. Property name is empty.")
+    if type_key not in PROPERTY_DATA_TYPE_MAP:
+        valid = ", ".join(sorted(PROPERTY_DATA_TYPE_MAP.keys()))
+        raise ValueError(
+            f"Unknown property data type: '{raw_type.strip()}'. Valid types: {valid}"
+        )
+    return wvc.Property(name=name, data_type=PROPERTY_DATA_TYPE_MAP[type_key])
 
 
 def get_client_from_context(ctx: click.Context) -> weaviate.WeaviateClient:
@@ -88,7 +132,7 @@ ASYNC_REPLICATION_CONFIG_HELP = (
     "Valid keys: " + ", ".join(sorted(ASYNC_REPLICATION_CONFIG_KEYS)) + ". "
     "All values must be integers. "
     'Use "reset" to revert all async replication settings to server defaults (update only). '
-    "Requires --async_enabled on create and Weaviate >= v1.36.0. "
+    "Requires --async-enabled on create and Weaviate >= v1.36.0. "
     "Deprecated keys, ignored by Weaviate >= v"
     + ASYNC_REPLICATION_CONFIG_REMOVED_VERSION
     + ": "
@@ -319,7 +363,7 @@ def _create_permission(
     role_scope: str | None = None,
     user: str | Sequence[str] = "*",
     collection: str | Sequence[str] = "*",
-    tenant: str | Sequence[str] | None = "*",
+    tenant: str | Sequence[str] = "*",
     alias: str | Sequence[str] = "*",
     verbosity: str = "minimal",
 ) -> PermissionsCreateType:
@@ -424,9 +468,11 @@ def older_than_version(client, minimum_version):
 
 
 def is_version_older_than(version, check_version):
-    return (
+    if (
         semver.Version.compare(
             semver.Version.parse(version), semver.Version.parse(check_version)
         )
         < 0
-    )
+    ):
+        return True
+    return False

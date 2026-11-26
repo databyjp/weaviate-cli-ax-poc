@@ -1,5 +1,4 @@
 import json
-from typing import overload
 
 import click
 from weaviate import WeaviateClient
@@ -16,27 +15,19 @@ class UserManager:
         self.client = client
 
     def get_user_from_role(
-        self, role_name: str | None = GetUserDefaults.role_name
+        self, role_name: str = GetUserDefaults.role_name
     ) -> list[str]:
-        """Get the user IDs assigned to the specified role."""
-        if role_name is None:
-            raise ValueError("Role name is required.")
+        """Get all roles assigned to a user."""
         try:
             return self.client.roles.get_assigned_user_ids(role_name=role_name)
         except Exception as e:
             raise Exception(f"Error getting users for role '{role_name}': {e}")
 
-    @overload
-    def get_user(self, user_name: None = None) -> OwnUser: ...
-
-    @overload
-    def get_user(self, user_name: str) -> UserDB | None: ...
-
     def get_user(
         self,
         user_name: str | None = None,
-    ) -> OwnUser | UserDB | None:
-        """Return the current user, or look up a named DB user (None if absent)."""
+    ) -> OwnUser | UserDB:
+        """Get a user in Weaviate. If no user name is provided, the current user is returned."""
 
         try:
             if user_name is None:
@@ -74,8 +65,10 @@ class UserManager:
         rotate_api_key: bool = False,
         activate: bool = False,
         deactivate: bool = False,
-    ) -> str | bool | None:
-        """Return the rotated key, the SDK activation/deactivation result, or None for no action."""
+    ) -> str | None:
+        """Update a user in Weaviate.
+        Returns the api key for the user if the api key was rotated, otherwise returns None.
+        """
         if user_name is None:
             raise Exception("User name is required.")
         if rotate_api_key and (activate or deactivate):
@@ -108,7 +101,7 @@ class UserManager:
 
     def add_role(
         self,
-        role_name: tuple[str],
+        role_name: tuple[str, ...],
         user_name: str,
         user_type: str = "db",
         json_output: bool = False,
@@ -148,7 +141,7 @@ class UserManager:
 
     def revoke_role(
         self,
-        role_name: tuple[str],
+        role_name: tuple[str, ...],
         user_name: str,
         user_type: str = "db",
         json_output: bool = False,
@@ -208,7 +201,7 @@ class UserManager:
         if len(user.roles) == 0:
             print(" - No roles assigned")
         else:
-            for role in user.roles:
+            for role in user.roles.keys():
                 print(f" - Role: {role}")
 
     def print_db_user(self, user: UserDB, json_output: bool = False) -> None:
