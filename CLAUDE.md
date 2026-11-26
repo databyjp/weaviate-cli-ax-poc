@@ -2,6 +2,8 @@
 
 CLI tool for managing Weaviate vector databases. Built with Python + Click.
 
+> **PoC fork note:** See `AGENTS.md` for the target AX architecture, `noun-verb` grammar, and updated error/JSON/exit-code rules (which supersede the legacy QA conventions below during the PoC refactor), and `TODO.md` for active tasks and progress.
+
 ## Quick Start
 
 ```bash
