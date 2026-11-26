@@ -72,7 +72,7 @@ def get_collection_cli(ctx, collection, json_output):
 @get.command("tenants")
 @click.option(
     "--collection",
-    default=GetTenantsDefaults.collection,
+    required=True,
     help="The name of the collection to get tenants from.",
     shell_complete=collection_name_complete,
 )

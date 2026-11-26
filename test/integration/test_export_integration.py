@@ -4,7 +4,6 @@ import pytest
 import weaviate
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.config_manager import ConfigManager
-from weaviate_cli.managers.data_manager import DataManager
 from weaviate_cli.managers.export_manager import ExportManager
 
 
@@ -23,30 +22,21 @@ def collection_manager(client: weaviate.WeaviateClient) -> CollectionManager:
 
 
 @pytest.fixture
-def data_manager(client: weaviate.WeaviateClient) -> DataManager:
-    return DataManager(client)
-
-
-@pytest.fixture
 def export_manager(client: weaviate.WeaviateClient) -> ExportManager:
     return ExportManager(client)
 
 
 @pytest.fixture
-def setup_collection(collection_manager, data_manager):
+def setup_collection(collection_manager):
     """Create a collection with data for export tests."""
     try:
         collection_manager.create_collection(
             collection=EXPORT_COLLECTION,
             replication_factor=1,
             vectorizer="none",
-            force_auto_schema=True,
         )
-        data_manager.create_data(
-            collection=EXPORT_COLLECTION,
-            limit=100,
-            randomize=True,
-            consistency_level="one",
+        collection_manager.client.collections.get(EXPORT_COLLECTION).data.insert_many(
+            [{"title": f"Item {i}"} for i in range(100)]
         )
         yield
     finally:
@@ -106,7 +96,6 @@ def test_create_export_json_output(
 def test_create_export_with_exclude(
     export_manager: ExportManager,
     collection_manager: CollectionManager,
-    data_manager: DataManager,
     setup_collection,
     capsys,
 ):
@@ -122,13 +111,9 @@ def test_create_export_with_exclude(
             collection=second_collection,
             replication_factor=1,
             vectorizer="none",
-            force_auto_schema=True,
         )
-        data_manager.create_data(
-            collection=second_collection,
-            limit=10,
-            randomize=True,
-            consistency_level="one",
+        collection_manager.client.collections.get(second_collection).data.insert_many(
+            [{"title": f"Excluded {i}"} for i in range(10)]
         )
         capsys.readouterr()  # Clear setup output
 

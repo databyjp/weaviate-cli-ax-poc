@@ -62,6 +62,21 @@ def test_create_collection(mock_client, mock_wvc_object_ttl):
     assert create_call_kwargs["replication_config"].factor == 3
     assert create_call_kwargs["replication_config"].asyncEnabled is True
     assert create_call_kwargs["sharding_config"] is None  # since shards = 1
+    assert create_call_kwargs["properties"] is None
+
+
+def test_create_collection_requires_collection_name(mock_client):
+    manager = CollectionManager(mock_client)
+    with pytest.raises(Exception, match="Collection name is required"):
+        manager.create_collection()
+
+
+def test_delete_collection_requires_collection_or_all(mock_client):
+    manager = CollectionManager(mock_client)
+    with pytest.raises(
+        Exception, match="Collection name is required unless --all is specified"
+    ):
+        manager.delete_collection()
 
 
 def test_create_existing_collection(mock_client, mock_wvc_object_ttl):
@@ -297,6 +312,7 @@ def test_create_collection_with_ttl_property_type(mock_client, mock_wvc_object_t
         object_ttl_type="property",
         object_ttl_time=86400,
         object_ttl_filter_expired=True,
+        object_ttl_property_name="expiresAt",
     )
 
     mock_collections.create.assert_called_once()
@@ -305,7 +321,7 @@ def test_create_collection_with_ttl_property_type(mock_client, mock_wvc_object_t
     assert create_call_kwargs["object_ttl_config"] is not None
     # Verify the correct TTL method was called
     mock_wvc_object_ttl["configure"].delete_by_date_property.assert_called_once_with(
-        property_name="releaseDate",
+        property_name="expiresAt",
         ttl_offset=86400,
         filter_expired_objects=True,
     )
@@ -366,31 +382,30 @@ def test_create_collection_object_ttl_property_name_guardrail(mock_client):
     mock_collections.create.assert_not_called()
 
 
-def test_create_collection_with_ttl_property_type_default_property_name(
+def test_create_collection_with_ttl_property_type_requires_property_name(
     mock_client, mock_wvc_object_ttl
 ):
-    """Test that object_ttl_type=property with no property name uses default 'releaseDate'."""
+    """Test that object_ttl_type=property requires an explicit object_ttl_property_name."""
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
+    mock_collections.exists.return_value = False
 
     manager = CollectionManager(mock_client)
 
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="property",
-        object_ttl_time=86400,
-        object_ttl_property_name=None,
-    )
+    with pytest.raises(
+        Exception,
+        match="object_ttl_property_name is required when object_ttl_type is 'property'",
+    ):
+        manager.create_collection(
+            collection="TestCollection",
+            replication_factor=3,
+            vector_index="hnsw",
+            object_ttl_type="property",
+            object_ttl_time=86400,
+            object_ttl_property_name=None,
+        )
 
-    mock_collections.create.assert_called_once()
-    mock_wvc_object_ttl["configure"].delete_by_date_property.assert_called_once_with(
-        property_name="releaseDate",
-        ttl_offset=86400,
-        filter_expired_objects=None,
-    )
+    mock_collections.create.assert_not_called()
 
 
 def test_create_collection_with_ttl_time_zero(mock_client, mock_wvc_object_ttl):
@@ -408,13 +423,14 @@ def test_create_collection_with_ttl_time_zero(mock_client, mock_wvc_object_ttl):
         object_ttl_type="property",
         object_ttl_time=0,
         object_ttl_filter_expired=False,
+        object_ttl_property_name="expiresAt",
     )
 
     mock_collections.create.assert_called_once()
     create_call_kwargs = mock_collections.create.call_args.kwargs
     assert create_call_kwargs["object_ttl_config"] is not None
     mock_wvc_object_ttl["configure"].delete_by_date_property.assert_called_once_with(
-        property_name="releaseDate",
+        property_name="expiresAt",
         ttl_offset=0,
         filter_expired_objects=False,
     )
@@ -531,6 +547,7 @@ def test_update_collection_with_ttl_property_type(mock_client, mock_wvc_object_t
         object_ttl_type="property",
         object_ttl_time=86400,
         object_ttl_filter_expired=True,
+        object_ttl_property_name="expiresAt",
     )
 
     mock_collection.config.update.assert_called_once()
@@ -538,7 +555,7 @@ def test_update_collection_with_ttl_property_type(mock_client, mock_wvc_object_t
     assert update_call_kwargs["object_ttl_config"] is not None
     # Verify the correct TTL method was called
     mock_wvc_object_ttl["reconfigure"].delete_by_date_property.assert_called_once_with(
-        property_name="releaseDate",
+        property_name="expiresAt",
         ttl_offset=86400,
         filter_expired_objects=True,
     )
@@ -614,38 +631,31 @@ def test_update_collection_object_ttl_property_name_guardrail(mock_client):
     mock_collection.config.update.assert_not_called()
 
 
-def test_update_collection_with_ttl_property_type_default_property_name(
+def test_update_collection_with_ttl_property_type_requires_property_name(
     mock_client, mock_wvc_object_ttl
 ):
-    """Test that object_ttl_type=property with no property name uses default 'releaseDate'."""
+    """Test that object_ttl_type=property requires an explicit object_ttl_property_name."""
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
+    mock_client.collections.exists.return_value = True
 
     mock_collection = MagicMock()
     mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
 
     manager = CollectionManager(mock_client)
 
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="property",
-        object_ttl_time=86400,
-        object_ttl_property_name=None,
-    )
+    with pytest.raises(
+        Exception,
+        match="object_ttl_property_name is required when object_ttl_type is 'property'",
+    ):
+        manager.update_collection(
+            collection="TestCollection",
+            object_ttl_type="property",
+            object_ttl_time=86400,
+            object_ttl_property_name=None,
+        )
 
-    mock_collection.config.update.assert_called_once()
-    mock_wvc_object_ttl["reconfigure"].delete_by_date_property.assert_called_once_with(
-        property_name="releaseDate",
-        ttl_offset=86400,
-        filter_expired_objects=None,
-    )
+    mock_collection.config.update.assert_not_called()
 
 
 def test_update_collection_with_ttl_time_zero(mock_client, mock_wvc_object_ttl):
@@ -670,13 +680,14 @@ def test_update_collection_with_ttl_time_zero(mock_client, mock_wvc_object_ttl):
         object_ttl_type="property",
         object_ttl_time=0,
         object_ttl_filter_expired=False,
+        object_ttl_property_name="expiresAt",
     )
 
     mock_collection.config.update.assert_called_once()
     update_call_kwargs = mock_collection.config.update.call_args.kwargs
     assert update_call_kwargs["object_ttl_config"] is not None
     mock_wvc_object_ttl["reconfigure"].delete_by_date_property.assert_called_once_with(
-        property_name="releaseDate",
+        property_name="expiresAt",
         ttl_offset=0,
         filter_expired_objects=False,
     )

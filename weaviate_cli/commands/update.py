@@ -14,12 +14,10 @@ from weaviate_cli.utils import (
 )
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.shard_manager import ShardManager
-from weaviate_cli.managers.data_manager import DataManager
 from weaviate.exceptions import WeaviateConnectionError
 from weaviate_cli.defaults import UpdateCollectionDefaults
 from weaviate_cli.defaults import UpdateTenantsDefaults
 from weaviate_cli.defaults import UpdateShardsDefaults
-from weaviate_cli.defaults import UpdateDataDefaults
 from weaviate_cli.defaults import UpdateUserDefaults
 
 
@@ -33,7 +31,7 @@ def update() -> None:
 @update.command("collection")
 @click.option(
     "--collection",
-    default=UpdateCollectionDefaults.collection,
+    required=True,
     help="The name of the collection to update.",
     shell_complete=collection_name_complete,
 )
@@ -112,7 +110,7 @@ def update() -> None:
     "--object_ttl_property_name",
     default=UpdateCollectionDefaults.object_ttl_property_name,
     type=str,
-    help="Date property name for TTL when object_ttl_type is 'property' (default: 'releaseDate'). Only valid when --object_ttl_type=property.",
+    help="Date property name for TTL when object_ttl_type is 'property'. Only valid when --object_ttl_type=property.",
 )
 @click.option(
     "--async_replication_config",
@@ -187,7 +185,7 @@ def update_collection_cli(
 @update.command("tenants")
 @click.option(
     "--collection",
-    default=UpdateTenantsDefaults.collection,
+    required=True,
     help="The name of the collection to update.",
 )
 @click.option(
@@ -287,81 +285,6 @@ def update_shards_cli(
             collection=collection,
             shards=shards,
             all=all,
-            json_output=json_output,
-        )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
-    finally:
-        if client:
-            client.close()
-
-
-@update.command("data")
-@click.option(
-    "--collection",
-    default=UpdateDataDefaults.collection,
-    help="The name of the collection to update.",
-)
-@click.option(
-    "--limit",
-    default=UpdateDataDefaults.limit,
-    help="Number of objects to update (default: 100).",
-)
-@click.option(
-    "--consistency_level",
-    default=UpdateDataDefaults.consistency_level,
-    type=click.Choice(["quorum", "all", "one"]),
-    help="Consistency level (default: 'quorum').",
-)
-@click.option("--randomize", is_flag=True, help="Randomize the data (default: False).")
-@click.option(
-    "--skip-seed", is_flag=True, help="Skip seeding the random data (default: False)."
-)
-@click.option(
-    "--verbose",
-    is_flag=True,
-    default=UpdateDataDefaults.verbose,
-    help="Show detailed progress information (default: True).",
-)
-@click.option(
-    "--parallel_workers",
-    default=UpdateDataDefaults.parallel_workers,
-    type=click.IntRange(min=1),
-    help=f"Number of tenants to process in parallel (default: {UpdateDataDefaults.parallel_workers}). Set to 1 to disable parallelism.",
-)
-@click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
-)
-@click.pass_context
-def update_data_cli(
-    ctx,
-    collection,
-    limit,
-    consistency_level,
-    randomize,
-    skip_seed,
-    verbose,
-    parallel_workers,
-    json_output,
-):
-    """Update data in a collection in Weaviate."""
-
-    client = None
-    try:
-        client = get_client_from_context(ctx)
-        data_manager = DataManager(client)
-        # Call the function from update_data.py with general and specific arguments
-        data_manager.update_data(
-            collection=collection,
-            limit=limit,
-            consistency_level=consistency_level,
-            randomize=randomize,
-            skip_seed=skip_seed,
-            verbose=verbose,
-            parallel_workers=parallel_workers,
             json_output=json_output,
         )
     except Exception as e:

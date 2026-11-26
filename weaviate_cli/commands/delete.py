@@ -10,14 +10,12 @@ from weaviate_cli.managers.alias_manager import AliasManager
 from weaviate_cli.managers.tenant_manager import TenantManager
 from weaviate_cli.utils import get_client_from_context
 from weaviate_cli.managers.collection_manager import CollectionManager
-from weaviate_cli.managers.data_manager import DataManager
 from weaviate_cli.managers.cluster_manager import ClusterManager
 from weaviate_cli.managers.role_manager import RoleManager
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.defaults import (
     DeleteCollectionDefaults,
     DeleteTenantsDefaults,
-    DeleteDataDefaults,
     DeleteRoleDefaults,
 )
 
@@ -42,9 +40,13 @@ def delete() -> None:
 )
 @click.pass_context
 def delete_collection_cli(
-    ctx: click.Context, collection: str, all: bool, json_output: bool
+    ctx: click.Context, collection: Optional[str], all: bool, json_output: bool
 ) -> None:
     """Delete a collection in Weaviate."""
+
+    if not all and not collection:
+        click.echo("Error: Either --collection or --all must be specified.", err=True)
+        sys.exit(1)
 
     client = None
     try:
@@ -67,7 +69,7 @@ def delete_collection_cli(
 @delete.command("tenants")
 @click.option(
     "--collection",
-    default=DeleteTenantsDefaults.collection,
+    required=True,
     help="The name of the collection to delete tenants from.",
     shell_complete=collection_name_complete,
 )
@@ -113,92 +115,6 @@ def delete_tenants_cli(
                 if tenants
                 else None
             ),
-            json_output=json_output,
-        )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
-    finally:
-        if client:
-            client.close()
-
-
-@delete.command("data")
-@click.option(
-    "--collection",
-    default=DeleteDataDefaults.collection,
-    help="The name of the collection to delete tenants from.",
-    shell_complete=collection_name_complete,
-)
-@click.option(
-    "--limit",
-    default=DeleteDataDefaults.limit,
-    help="Number of objects to delete (default: 100).",
-)
-@click.option(
-    "--consistency_level",
-    default=DeleteDataDefaults.consistency_level,
-    type=click.Choice(["quorum", "all", "one"]),
-    help="Consistency level (default: 'quorum').",
-)
-@click.option(
-    "--tenants",
-    default=None,
-    help="Comma separated list of tenants to delete data from.",
-)
-@click.option(
-    "--uuid",
-    default=DeleteDataDefaults.uuid,
-    help="UUID of the oject to be deleted. If provided, --limit will be ignored.",
-)
-@click.option(
-    "--verbose",
-    is_flag=True,
-    default=DeleteDataDefaults.verbose,
-    help="Show detailed progress information (default: False).",
-)
-@click.option(
-    "--parallel_workers",
-    default=DeleteDataDefaults.parallel_workers,
-    type=click.IntRange(min=1),
-    help=f"Number of tenants to process in parallel (default: {DeleteDataDefaults.parallel_workers}). Set to 1 to disable parallelism.",
-)
-@click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
-)
-@click.pass_context
-def delete_data_cli(
-    ctx,
-    collection,
-    limit,
-    consistency_level,
-    tenants,
-    uuid,
-    verbose,
-    parallel_workers,
-    json_output,
-):
-    """Delete data from a collection in Weaviate."""
-
-    client = None
-    try:
-        client = get_client_from_context(ctx)
-        data_manager = DataManager(client)
-        # Call the function from delete_data.py with general and specific arguments
-        data_manager.delete_data(
-            collection=collection,
-            limit=limit,
-            consistency_level=consistency_level,
-            tenants_list=(
-                [t.strip() for t in tenants.split(",") if t.strip()]
-                if tenants
-                else None
-            ),
-            uuid=uuid,
-            verbose=verbose,
-            parallel_workers=parallel_workers,
             json_output=json_output,
         )
     except Exception as e:

@@ -50,3 +50,8 @@ def test_main_commands_registered():
     assert "update" in main.commands
     assert "restore" in main.commands
     assert "query" in main.commands
+    assert "benchmark" not in main.commands
+    assert "data" not in main.commands["create"].commands
+    assert "data" not in main.commands["delete"].commands
+    assert "data" not in main.commands["update"].commands
+    assert "data" not in main.commands["query"].commands

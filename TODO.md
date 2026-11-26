@@ -9,10 +9,10 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - [x] Confirm surface boundaries and revise PoC plan (`noun-verb` grammar, redesigned `collection`/`tenant` DDL, safe `wcloud` delegation, `local` Docker lifecycle with `snowflake-snowflake-arctic-embed-m-v1.5-onnx`, and AX contract hardening).
 
 ### 1. Prune QA and data-plane scope
-- [ ] Remove data-plane commands (`create/update/delete/query data`) and `weaviate_cli/managers/data_manager.py`.
-- [ ] Remove `benchmark` command and `weaviate_cli/managers/benchmark_manager.py`.
-- [ ] Remove `weaviate_cli/datasets/movies.json`, hardcoded `Movies` schema in `collection_manager.py`, and `"Movies"` / `replication_factor=3` QA defaults in `defaults.py`.
-- [ ] Drop heavy dependencies (`numpy`, `faker`, `matplotlib`) from `setup.cfg` and clean up removed tests/imports.
+- [x] Remove data-plane commands (`create/update/delete/query data`) and `weaviate_cli/managers/data_manager.py`.
+- [x] Remove `benchmark` command and `weaviate_cli/managers/benchmark_manager.py`.
+- [x] Remove `weaviate_cli/datasets/movies.json`, hardcoded `Movies` schema in `collection_manager.py`, and `"Movies"` / `replication_factor=3` QA defaults in `defaults.py`.
+- [x] Drop heavy dependencies (`numpy`, `faker`, `matplotlib`) from `setup.cfg` and clean up removed tests/imports.
 
 ### 2. Migrate to `noun-verb` admin and DDL command tree
 - [ ] Reorganize commands into `noun-verb` groups with `kebab-case` flags (no backwards-compatible `verb-noun` aliases):
@@ -84,3 +84,4 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - Audited `weaviate-cli` codebase alongside `wcloud` (`weaviate/weaviate-cloud`), native Weaviate MCP (`/v1/mcp` in `v1.37.1+`), and `weaviate/agent-skills`.
 - Confirmed four-surface strategy and revised the PoC plan: `noun-verb` grammar, keeping redesigned `collection` and `tenant` DDL for `CLI -> MCP` completeness, safe TTY-aware `wcloud` delegation with one-time API key capture, opinionated `local` Docker lifecycle using `snowflake-snowflake-arctic-embed-m-v1.5-onnx`, and AX contract hardening.
 - Split durable architecture rules and rationale (`AGENTS.md`) from volatile checklists and progress logs (`TODO.md`).
+- Completed Phase 1: removed data-plane commands (`create/update/delete/query data`), `benchmark`, `data_manager.py`, `benchmark_manager.py`, `datasets/movies.json`, hardcoded `Movies` schema/defaults, `replication_factor=3` default, and `numpy`/`faker`/`matplotlib`/`importlib-resources` dependencies.

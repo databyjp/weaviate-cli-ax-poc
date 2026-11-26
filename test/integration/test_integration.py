@@ -1,10 +1,8 @@
 import pytest
 import weaviate
-from click.testing import CliRunner
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.config_manager import ConfigManager
 from weaviate_cli.managers.shard_manager import ShardManager
-from weaviate_cli.managers.data_manager import DataManager
 import weaviate.classes.config as wvc
 
 
@@ -24,51 +22,48 @@ def shard_manager(client: weaviate.Client) -> ShardManager:
     return ShardManager(client)
 
 
-@pytest.fixture
-def data_manager(client: weaviate.Client) -> DataManager:
-    return DataManager(client)
-
-
 def test_collection_lifecycle(collection_manager: CollectionManager):
+    col_name = "LifecycleTestCol"
     try:
         # Create collection
         collection_manager.create_collection(
+            collection=col_name,
             inverted_index="timestamp",
             replication_factor=1,
             training_limit=100000,
             async_enabled=True,
             vectorizer="contextionary",
-            force_auto_schema=True,
         )
 
         # Verify collection exists
-        assert collection_manager.client.collections.exists("Movies")
+        assert collection_manager.client.collections.exists(col_name)
 
         # Update collection
         collection_manager.update_collection(
-            description="Updated movie collection",
+            collection=col_name,
+            description="Updated test collection",
             vector_index="hnsw_pq",
             training_limit=100000,
             async_enabled=False,
         )
 
         # Get collection config to verify update
-        movies_collection = collection_manager.client.collections.get("Movies")
-        config = movies_collection.config.get()
-        assert config.description == "Updated movie collection"
+        col = collection_manager.client.collections.get(col_name)
+        config = col.config.get()
+        assert config.description == "Updated test collection"
         assert config.replication_config.async_enabled is False
 
     finally:
         # Delete collection
-        if collection_manager.client.collections.exists("Movies"):
-            collection_manager.delete_collection(collection="Movies")
-        assert not collection_manager.client.collections.exists("Movies")
+        if collection_manager.client.collections.exists(col_name):
+            collection_manager.delete_collection(collection=col_name)
+        assert not collection_manager.client.collections.exists(col_name)
 
 
 def test_multiple_collections(collection_manager: CollectionManager):
     try:
         # Create multiple collections
-        collections = ["Movies", "Books", "Music"]
+        collections = ["Articles", "Books", "Music"]
 
         for col in collections:
             collection_manager.create_collection(
@@ -79,7 +74,6 @@ def test_multiple_collections(collection_manager: CollectionManager):
                 training_limit=100000,
                 async_enabled=True,
                 vectorizer="contextionary",
-                force_auto_schema=True,
             )
             assert collection_manager.client.collections.exists(col)
     finally:
@@ -94,38 +88,35 @@ def test_multiple_collections(collection_manager: CollectionManager):
 def test_shard_operations(
     collection_manager: CollectionManager,
     shard_manager: ShardManager,
-    data_manager: DataManager,
 ):
+    col_name = "ShardTestCol"
     try:
         # Create collection with multiple shards
         collection_manager.create_collection(
+            collection=col_name,
             inverted_index="null",
             replication_factor=1,
             training_limit=1000,
             shards=3,
             async_enabled=True,
-            vectorizer="transformers",
-            force_auto_schema=True,
+            vectorizer="none",
         )
 
         # Get shard info
-        movies_collection = collection_manager.client.collections.get("Movies")
+        col = collection_manager.client.collections.get(col_name)
+        col.data.insert_many([{"title": f"Item {i}"} for i in range(10)])
 
-        data_manager.create_data(
-            limit=1000,
-            consistency_level="one",
-        )
-
-        shards = movies_collection.config.get_shards()
+        shards = col.config.get_shards()
         assert len(shards) == 3
 
-        objects = movies_collection.with_consistency_level(
+        objects = col.with_consistency_level(
             wvc.ConsistencyLevel.ONE
-        ).query.fetch_objects(limit=1000)
-        assert len(objects.objects) == 1000
+        ).query.fetch_objects(limit=10)
+        assert len(objects.objects) == 10
     finally:
         # Clean up
-        collection_manager.delete_collection(collection="Movies")
+        if collection_manager.client.collections.exists(col_name):
+            collection_manager.delete_collection(collection=col_name)
 
 
 def test_error_handling(collection_manager: CollectionManager):
@@ -137,7 +128,6 @@ def test_error_handling(collection_manager: CollectionManager):
             training_limit=100000,
             async_enabled=True,
             vectorizer="transformers",
-            force_auto_schema=True,
         )
 
         with pytest.raises(Exception):
@@ -147,7 +137,6 @@ def test_error_handling(collection_manager: CollectionManager):
                 training_limit=100000,
                 async_enabled=True,
                 vectorizer="transformers",
-                force_auto_schema=True,
             )
     finally:
         # Test deleting non-existent collection

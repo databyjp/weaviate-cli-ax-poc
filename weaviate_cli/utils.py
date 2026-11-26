@@ -54,68 +54,6 @@ def print_json_or_text(
         text_fn()
 
 
-# Pretty print objects in the response in a table format
-def pp_objects(response, main_properties, json_output: bool = False):
-
-    objects = []
-    if type(response) == weaviate.collections.classes.internal.ObjectSingleReturn:
-        objects.append(response)
-    else:
-        objects = response.objects
-
-    if json_output:
-        json_objects = []
-        for obj in objects:
-            obj_dict = {
-                "uuid": str(obj.uuid),
-                "properties": {
-                    prop: obj.properties.get(prop, None) for prop in main_properties
-                },
-                "distance": (
-                    getattr(obj.metadata, "distance", None) if obj.metadata else None
-                ),
-                "certainty": (
-                    getattr(obj.metadata, "certainty", None) if obj.metadata else None
-                ),
-                "score": getattr(obj.metadata, "score", None) if obj.metadata else None,
-            }
-            json_objects.append(obj_dict)
-        click.echo(
-            json.dumps(
-                {"objects": json_objects, "total": len(json_objects)},
-                indent=2,
-                default=str,
-            )
-        )
-        return
-
-    # Create the header
-    header = f"{'ID':<37}"
-    for prop in main_properties:
-        header += f"{prop.capitalize():<37}"
-    header += f"{'Distance':<11}{'Certainty':<11}{'Score':<11}"
-    print(header)
-
-    if len(objects) == 0:
-        print("No objects found")
-        return
-
-    # Print each object
-    for obj in objects:
-        row = f"{str(obj.uuid):<36} "
-        for prop in main_properties:
-            row += f"{str(obj.properties.get(prop, ''))[:36]:<36} "
-        row += f"{str(obj.metadata.distance)[:10] if hasattr(obj.metadata, 'distance') else 'None':<10} "
-        row += f"{str(obj.metadata.certainty)[:10] if hasattr(obj.metadata, 'certainty') else 'None':<10} "
-        row += f"{str(obj.metadata.score)[:10] if hasattr(obj.metadata, 'score') else 'None':<10}"
-        print(row)
-
-    # Print footer
-    footer = f"{'':<37}" * (len(main_properties) + 1) + f"{'':<11}{'':<11}{'':<11}"
-    print(footer)
-    print(f"Total: {len(objects)} objects")
-
-
 ASYNC_REPLICATION_CONFIG_KEYS = {
     "max_workers",
     "hashtree_height",

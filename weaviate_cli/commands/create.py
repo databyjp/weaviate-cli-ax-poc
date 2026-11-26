@@ -14,13 +14,11 @@ from weaviate_cli.managers.backup_manager import BackupManager
 from weaviate_cli.managers.export_manager import ExportManager
 from weaviate_cli.utils import (
     get_client_from_context,
-    get_async_client_from_context,
     parse_async_replication_config,
     ASYNC_REPLICATION_CONFIG_HELP,
 )
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.tenant_manager import TenantManager
-from weaviate_cli.managers.data_manager import DataManager
 from weaviate_cli.managers.cluster_manager import ClusterManager
 from weaviate_cli.managers.role_manager import RoleManager
 from weaviate_cli.managers.user_manager import UserManager
@@ -30,10 +28,8 @@ from weaviate_cli.defaults import (
     CreateCollectionDefaults,
     CreateExportCollectionDefaults,
     CreateTenantsDefaults,
-    CreateDataDefaults,
     CreateRoleDefaults,
     PERMISSION_HELP_STRING,
-    MAX_WORKERS,
 )
 
 
@@ -48,14 +44,14 @@ def create() -> None:
 @create.command("collection")
 @click.option(
     "--collection",
-    default=CreateCollectionDefaults.collection,
+    required=True,
     help="The name of the collection to create.",
     shell_complete=collection_name_complete,
 )
 @click.option(
     "--replication_factor",
     default=CreateCollectionDefaults.replication_factor,
-    help="Replication factor (default: 3).",
+    help=f"Replication factor (default: {CreateCollectionDefaults.replication_factor}).",
 )
 @click.option(
     "--async_enabled",
@@ -112,11 +108,6 @@ def create() -> None:
     "--auto_tenant_activation",
     is_flag=True,
     help="Enable auto tenant activation (default: False).",
-)
-@click.option(
-    "--force_auto_schema",
-    is_flag=True,
-    help="Force auto-schema (default: False). If passed, no properties will be added to the collection and it will be the auto-schema the one that infers the properties.",
 )
 @click.option(
     "--shards",
@@ -190,7 +181,7 @@ def create() -> None:
     "--object_ttl_property_name",
     default=CreateCollectionDefaults.object_ttl_property_name,
     type=str,
-    help="Date property name for TTL when object_ttl_type is 'property' (default: 'releaseDate'). Only valid when --object_ttl_type=property.",
+    help="Date property name for TTL when object_ttl_type is 'property'. Only valid when --object_ttl_type=property.",
 )
 @click.option(
     "--hfresh_max_posting_size_kb",
@@ -239,7 +230,6 @@ def create_collection_cli(
     multitenant: bool,
     auto_tenant_creation: bool,
     auto_tenant_activation: bool,
-    force_auto_schema: bool,
     shards: int,
     vectorizer: Optional[str],
     vectorizer_base_url: Optional[str],
@@ -289,7 +279,6 @@ def create_collection_cli(
             multitenant=multitenant,
             auto_tenant_creation=auto_tenant_creation,
             auto_tenant_activation=auto_tenant_activation,
-            force_auto_schema=force_auto_schema,
             shards=shards,
             vectorizer=vectorizer,
             vectorizer_base_url=vectorizer_base_url,
@@ -324,8 +313,8 @@ def create_collection_cli(
 @create.command("tenants")
 @click.option(
     "--collection",
-    default=CreateTenantsDefaults.collection,
-    help="The name of the collection to create.",
+    required=True,
+    help="The name of the collection to create tenants in.",
     shell_complete=collection_name_complete,
 )
 @click.option(
@@ -460,181 +449,6 @@ def create_backup_cli(
             wait=wait,
             cpu_for_backup=cpu_for_backup,
             incremental_base_backup_id=incremental_base_backup_id,
-            json_output=json_output,
-        )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
-    finally:
-        if client:
-            client.close()
-
-
-# Subcommand to ingest data
-@create.command("data")
-@click.option(
-    "--collection",
-    default=CreateDataDefaults.collection,
-    help="The name of the collection to ingest data into.",
-    shell_complete=collection_name_complete,
-)
-@click.option(
-    "--limit",
-    default=CreateDataDefaults.limit,
-    help=f"Number of objects to import (default: {CreateDataDefaults.limit}).",
-    type=int,
-)
-@click.option(
-    "--consistency_level",
-    default=CreateDataDefaults.consistency_level,
-    type=click.Choice(["quorum", "all", "one"]),
-    help="Consistency level (default: 'quorum').",
-)
-@click.option("--randomize", is_flag=True, help="Randomize the data (default: False).")
-@click.option(
-    "--skip-seed", is_flag=True, help="Skip seeding the random data (default: False)."
-)
-@click.option(
-    "--auto_tenants",
-    default=CreateDataDefaults.auto_tenants,
-    help="Number of tenants for which we will send data. NOTE: Requires class with --auto_tenant_creation (default: 0).",
-)
-@click.option(
-    "--tenants",
-    default=None,
-    help="Comma separated list of tenants to send data to.",
-)
-@click.option(
-    "--tenant_suffix",
-    default=CreateTenantsDefaults.tenant_suffix,
-    help="The suffix to add to the tenant name (default: 'Tenant-'). Only used if --auto_tenants is provided.",
-)
-@click.option(
-    "--vector_dimensions",
-    default=CreateDataDefaults.vector_dimensions,
-    help="Number of vector dimensions to be used when the data is randomized.",
-)
-@click.option(
-    "--uuid",
-    default=None,
-    help="UUID of the object to be used when the data is randomized. It requires --limit=1 and --randomize to be enabled.",
-)
-@click.option(
-    "--wait_for_indexing",
-    is_flag=True,
-    default=CreateDataDefaults.wait_for_indexing,
-    help="Wait for the indexing to complete before returning.",
-)
-@click.option(
-    "--verbose",
-    is_flag=True,
-    default=CreateDataDefaults.verbose,
-    help="Show detailed progress information (default: True).",
-)
-@click.option(
-    "--multi_vector",
-    is_flag=True,
-    help="Enable multi-vector (default: False).",
-)
-@click.option(
-    "--dynamic_batch",
-    is_flag=True,
-    help="Enable dynamic batching (default: False).",
-)
-@click.option(
-    "--batch_size",
-    default=CreateDataDefaults.batch_size,
-    help=f"Number of objects to ingest in each batch (default: {CreateDataDefaults.batch_size}).",
-    type=int,
-)
-@click.option(
-    "--concurrent_requests",
-    default=MAX_WORKERS,
-    type=int,
-    help=f"Number of concurrent requests to send to the server (default: {MAX_WORKERS}).",
-)
-@click.option(
-    "--parallel_workers",
-    default=CreateDataDefaults.parallel_workers,
-    type=click.IntRange(min=1),
-    help=f"Number of tenants to process in parallel (default: {CreateDataDefaults.parallel_workers}). Set to 1 to disable parallelism.",
-)
-@click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
-)
-@click.pass_context
-def create_data_cli(
-    ctx,
-    collection,
-    limit,
-    consistency_level,
-    randomize,
-    skip_seed,
-    auto_tenants,
-    tenants,
-    tenant_suffix,
-    vector_dimensions,
-    uuid,
-    wait_for_indexing,
-    verbose,
-    multi_vector,
-    dynamic_batch,
-    batch_size,
-    concurrent_requests,
-    parallel_workers,
-    json_output,
-):
-    """Ingest data into a collection in Weaviate."""
-
-    if vector_dimensions != 1536 and not randomize:
-        click.echo(
-            "Error: --vector_dimensions has no effect unless --randomize is enabled."
-        )
-        sys.exit(1)
-
-    if uuid is not None and not randomize:
-        click.echo("Error: --uuid has no effect unless --randomize is enabled.")
-        sys.exit(1)
-
-    if uuid is not None and limit != 1:
-        click.echo("Error: --uuid has no effect unless --limit=1 is enabled.")
-        sys.exit(1)
-
-    if dynamic_batch and not randomize:
-        click.echo(
-            "Error: --dynamic_batch has no effect unless --randomize is enabled."
-        )
-        sys.exit(1)
-
-    client: Optional[WeaviateClient] = None
-    try:
-        client = get_client_from_context(ctx)
-        data_manager = DataManager(client)
-        # Call the function from ingest_data.py with general and specific arguments
-        data_manager.create_data(
-            collection=collection,
-            limit=limit,
-            consistency_level=consistency_level,
-            randomize=randomize,
-            skip_seed=skip_seed,
-            auto_tenants=auto_tenants,
-            tenants_list=(
-                [t.strip() for t in tenants.split(",") if t.strip()]
-                if tenants
-                else None
-            ),
-            vector_dimensions=vector_dimensions,
-            uuid=uuid,
-            tenant_suffix=tenant_suffix,
-            wait_for_indexing=wait_for_indexing,
-            verbose=verbose,
-            multi_vector=multi_vector,
-            dynamic_batch=dynamic_batch,
-            batch_size=batch_size,
-            concurrent_requests=concurrent_requests,
-            parallel_workers=parallel_workers,
             json_output=json_output,
         )
     except Exception as e:

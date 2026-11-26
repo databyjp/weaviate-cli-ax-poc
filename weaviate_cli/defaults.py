@@ -1,6 +1,5 @@
-from dataclasses import dataclass, field
-import multiprocessing
-from typing import Optional, List, Dict
+from dataclasses import dataclass
+from typing import Optional, List
 
 
 PERMISSION_HELP_STRING = (
@@ -19,7 +18,7 @@ PERMISSION_HELP_STRING = (
     "    crud_collections:collection,cud_data:collection,rd_collections,\n\n"
     "    crud_roles:role,cud_tenants:tenant,rd_tenants,\n\n"
     "    crud_users:user,cud_data:*,rd_data:*\n\n"
-    "    crud_aliases:Movies,cud_aliases:Movies,rd_aliases:Movies\n\n"
+    "    crud_aliases:MyCollection,cud_aliases:MyCollection,rd_aliases:MyCollection\n\n"
     "Subfields:\n\n"
     "  - *_collections:collection name, can be specified multiple times\n\n"
     "  - *_roles:role name:scope, can be specified multiple times.\n\n"
@@ -30,40 +29,30 @@ PERMISSION_HELP_STRING = (
     "  - *_backups:collection_name, can be specified multiple times\n\n"
     "  - read_nodes:verbosity (verbosity level)\n\n"
     "Examples:\n\n"
-    "  --permission crud_collections:Movies\n\n"
+    "  --permission crud_collections:Articles\n\n"
     "  --permission cud_tenants:Person_*\n\n"
     "  --permission rucd_data:Person_*\n\n"
     "  --permission assign_and_revoke_users:user-1,user-2\n\n"
-    "  --permission create_collections:Movies,Books\n\n"
-    "  --permission create_tenants:Movies,Books\n\n"
-    "  --permission crud_tenants:Movies,Books:MyTenant*,YourTenant*\n\n"
+    "  --permission create_collections:Articles,Books\n\n"
+    "  --permission create_tenants:Articles,Books\n\n"
+    "  --permission crud_tenants:Articles,Books:MyTenant*,YourTenant*\n\n"
     "  --permission crud_roles:Admin,Editor:all\n\n"
     "  --permission create_roles:Editor:match\n\n"
     "  --permission read_roles:Admin,Editor:match\n\n"
-    "  --permission read_nodes:verbose:Movies\n\n"
+    "  --permission read_nodes:verbose:Articles\n\n"
     "  --permission read_nodes:minimal\n\n"
-    "  --permission manage_backups:Movies\n\n"
+    "  --permission manage_backups:Articles\n\n"
     "  --permission read_cluster\n\n"
-    "  --permission crud_aliases:Movies,Books:Alias*\n\n"
+    "  --permission crud_aliases:Articles,Books:Alias*\n\n"
     "  --permission create_aliases:Banks\n\n"
     "  --permission crud_users:user-1,user-2\n\n"
 )
-QUERY_MAXIMUM_RESULTS = 10000
-MAX_OBJECTS_PER_BATCH = 5000
-
-try:
-    _CPU_COUNT = multiprocessing.cpu_count()
-except (NotImplementedError, OSError):
-    _CPU_COUNT = None
-# Fallback to 1 worker if CPU count is unavailable or invalid
-_SAFE_CPU_COUNT = _CPU_COUNT if isinstance(_CPU_COUNT, int) and _CPU_COUNT > 0 else 1
-MAX_WORKERS = min(32, _SAFE_CPU_COUNT + 4)
 
 
 @dataclass
 class CreateCollectionDefaults:
-    collection: str = "Movies"
-    replication_factor: int = 3
+    collection: Optional[str] = None
+    replication_factor: int = 1
     async_enabled: bool = False
     vector_index: str = "hnsw"
     inverted_index: Optional[str] = None
@@ -71,7 +60,6 @@ class CreateCollectionDefaults:
     multitenant: bool = False
     auto_tenant_creation: bool = False
     auto_tenant_activation: bool = False
-    force_auto_schema: bool = False
     shards: int = 0
     vectorizer: str = "none"
     vectorizer_base_url: Optional[str] = None
@@ -86,12 +74,12 @@ class CreateCollectionDefaults:
     object_ttl_type: str = "create"
     object_ttl_time: Optional[int] = None
     object_ttl_filter_expired: Optional[bool] = None
-    object_ttl_property_name: str = "releaseDate"
+    object_ttl_property_name: Optional[str] = None
 
 
 @dataclass
 class CreateTenantsDefaults:
-    collection: str = "Movies"
+    collection: Optional[str] = None
     tenant_suffix: str = "Tenant"
     number_tenants: int = 100
     tenant_batch_size: Optional[int] = None
@@ -111,44 +99,6 @@ class CreateBackupDefaults:
 
 
 @dataclass
-class CreateDataDefaults:
-    collection: str = "Movies"
-    limit: int = 1000
-    consistency_level: str = "quorum"
-    randomize: bool = False
-    auto_tenants: int = 0
-    vector_dimensions: int = 1536
-    skip_seed: bool = False
-    wait_for_indexing: bool = False
-    verbose: bool = False
-    multi_vector: bool = False
-    batch_size: int = 1000
-    dynamic_batch: bool = False
-    parallel_workers: int = MAX_WORKERS
-
-
-@dataclass
-class CreateBenchmarkDefaults:
-    fail_on_timeout: bool = False
-    max_duration: int = 300
-    collection: str = "Movies"
-    certainty: bool = False
-    output: str = "stdout"
-    query_type: str = "hybrid"
-    limit: int = 10
-    qps: Optional[int] = None
-    query_terms: Optional[List[str]] = None
-    warmup_duration: int = 5
-    test_duration: int = 10
-    latency_threshold: int = 10000
-    consistency_level: str = "QUORUM"
-    concurrency: Optional[int] = None
-    generate_graph: bool = False
-    file_alias: Optional[str] = None
-    tenant: Optional[str] = None
-
-
-@dataclass
 class CreateRoleDefaults:
     role_name: str = "NewRole"
     permission: tuple = ()
@@ -162,26 +112,16 @@ class CancelBackupDefaults:
 
 @dataclass
 class DeleteCollectionDefaults:
-    collection: str = "Movies"
+    collection: Optional[str] = None
     all: bool = False
 
 
 @dataclass
 class DeleteTenantsDefaults:
-    collection: str = "Movies"
+    collection: Optional[str] = None
     tenant_suffix: str = "Tenant"
     number_tenants: int = 100
     tenants: Optional[list] = None
-
-
-@dataclass
-class DeleteDataDefaults:
-    collection: str = "Movies"
-    limit: int = 100
-    consistency_level: str = "quorum"
-    uuid: Optional[str] = None
-    verbose: bool = False
-    parallel_workers: int = MAX_WORKERS
 
 
 @dataclass
@@ -196,7 +136,7 @@ class GetCollectionDefaults:
 
 @dataclass
 class GetTenantsDefaults:
-    collection: str = "Movies"
+    collection: Optional[str] = None
     tenant_id: Optional[str] = None
     verbose: bool = False
 
@@ -227,18 +167,6 @@ class GetUserDefaults:
 
 
 @dataclass
-class QueryDataDefaults:
-    collection: str = "Movies"
-    search_type: str = "fetch"
-    query: str = "Action movie"
-    consistency_level: str = "quorum"
-    limit: int = 10
-    properties: str = "title,keywords"
-    tenants: Optional[str] = None
-    target_vector: Optional[str] = None
-
-
-@dataclass
 class RestoreBackupDefaults:
     backend: str = "s3"
     backup_id: str = "test-backup"
@@ -250,7 +178,7 @@ class RestoreBackupDefaults:
 
 @dataclass
 class UpdateCollectionDefaults:
-    collection: str = "Movies"
+    collection: Optional[str] = None
     async_enabled: Optional[bool] = None
     replication_factor: Optional[int] = None
     vector_index: Optional[str] = None
@@ -262,12 +190,12 @@ class UpdateCollectionDefaults:
     object_ttl_type: str = "create"
     object_ttl_time: Optional[int] = None
     object_ttl_filter_expired: Optional[bool] = None
-    object_ttl_property_name: str = "releaseDate"
+    object_ttl_property_name: Optional[str] = None
 
 
 @dataclass
 class UpdateTenantsDefaults:
-    collection: str = "Movies"
+    collection: Optional[str] = None
     tenant_suffix: str = "Tenant"
     number_tenants: int = 100
     state: str = "active"
@@ -280,17 +208,6 @@ class UpdateShardsDefaults:
     status: str = "READY"
     shards: Optional[str] = None
     all: bool = False
-
-
-@dataclass
-class UpdateDataDefaults:
-    collection: str = "Movies"
-    limit: int = 100
-    consistency_level: str = "quorum"
-    randomize: bool = False
-    skip_seed: bool = False
-    verbose: bool = False
-    parallel_workers: int = MAX_WORKERS
 
 
 @dataclass

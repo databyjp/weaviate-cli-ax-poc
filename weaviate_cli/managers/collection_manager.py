@@ -200,7 +200,7 @@ class CollectionManager:
 
     def create_collection(
         self,
-        collection: str = CreateCollectionDefaults.collection,
+        collection: Optional[str] = CreateCollectionDefaults.collection,
         replication_factor: int = CreateCollectionDefaults.replication_factor,
         async_enabled: bool = CreateCollectionDefaults.async_enabled,
         vector_index: str = CreateCollectionDefaults.vector_index,
@@ -209,7 +209,6 @@ class CollectionManager:
         multitenant: bool = CreateCollectionDefaults.multitenant,
         auto_tenant_creation: bool = CreateCollectionDefaults.auto_tenant_creation,
         auto_tenant_activation: bool = CreateCollectionDefaults.auto_tenant_activation,
-        force_auto_schema: bool = CreateCollectionDefaults.force_auto_schema,
         shards: int = CreateCollectionDefaults.shards,
         vectorizer: str = CreateCollectionDefaults.vectorizer,
         vectorizer_base_url: Optional[
@@ -241,6 +240,8 @@ class CollectionManager:
         async_replication_config: Optional[Dict[str, int]] = None,
     ) -> None:
 
+        if not collection:
+            raise Exception("Error: Collection name is required.")
         if (
             object_ttl_type != "property"
             and object_ttl_property_name
@@ -248,6 +249,14 @@ class CollectionManager:
         ):
             raise Exception(
                 "object_ttl_property_name is only valid when object_ttl_type is 'property'."
+            )
+        if (
+            object_ttl_type == "property"
+            and object_ttl_time is not None
+            and not object_ttl_property_name
+        ):
+            raise Exception(
+                "object_ttl_property_name is required when object_ttl_type is 'property'."
             )
         if self.client.collections.exists(collection):
 
@@ -477,22 +486,24 @@ class CollectionManager:
             ),
         }
 
-        object_ttl_type_map: Dict[str, wvc.ObjectTTLType] = {
-            "create": wvc.Configure.ObjectTTL.delete_by_creation_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "update": wvc.Configure.ObjectTTL.delete_by_update_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "property": wvc.Configure.ObjectTTL.delete_by_date_property(
-                property_name=object_ttl_property_name
-                or CreateCollectionDefaults.object_ttl_property_name,
-                ttl_offset=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-        }
+        object_ttl_config = None
+        if object_ttl_time is not None:
+            if object_ttl_type == "create":
+                object_ttl_config = wvc.Configure.ObjectTTL.delete_by_creation_time(
+                    time_to_live=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
+            elif object_ttl_type == "update":
+                object_ttl_config = wvc.Configure.ObjectTTL.delete_by_update_time(
+                    time_to_live=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
+            elif object_ttl_type == "property":
+                object_ttl_config = wvc.Configure.ObjectTTL.delete_by_date_property(
+                    property_name=object_ttl_property_name,
+                    ttl_offset=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
 
         vectorizer_map: Dict[str, wvc.VectorizerConfig] = {}
         if named_vector:
@@ -525,40 +536,6 @@ class CollectionManager:
             "null": wvc.Configure.inverted_index(index_null_state=True),
             "length": wvc.Configure.inverted_index(index_property_length=True),
         }
-
-        # Collection schema
-        properties: List[wvc.Property] = [
-            wvc.Property(name="title", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="genres", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="keywords", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="director", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="popularity", data_type=wvc.DataType.NUMBER),
-            wvc.Property(name="runtime", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="cast", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="originalLanguage", data_type=wvc.DataType.TEXT),
-            wvc.Property(
-                name="productionCountries",
-                data_type=wvc.DataType.OBJECT_ARRAY,
-                nested_properties=[
-                    wvc.Property(name="iso_3166_1", data_type=wvc.DataType.TEXT),
-                    wvc.Property(name="name", data_type=wvc.DataType.TEXT),
-                ],
-            ),
-            wvc.Property(
-                name="spokenLanguages",
-                data_type=wvc.DataType.OBJECT_ARRAY,
-                nested_properties=[
-                    wvc.Property(name="iso_639_1", data_type=wvc.DataType.TEXT),
-                    wvc.Property(name="name", data_type=wvc.DataType.TEXT),
-                ],
-            ),
-            wvc.Property(name="tagline", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="budget", data_type=wvc.DataType.NUMBER),
-            wvc.Property(name="releaseDate", data_type=wvc.DataType.DATE),
-            wvc.Property(name="revenue", data_type=wvc.DataType.NUMBER),
-            wvc.Property(name="status", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="coverImage", data_type=wvc.DataType.BLOB),
-        ]
 
         rds_map = {
             "delete_on_conflict": wvc.ReplicationDeletionStrategy.DELETE_ON_CONFLICT,
@@ -609,12 +586,8 @@ class CollectionManager:
                     if named_vector
                     else vectorizer_map[vectorizer]
                 ),
-                object_ttl_config=(
-                    object_ttl_type_map[object_ttl_type]
-                    if object_ttl_time is not None
-                    else None
-                ),
-                properties=(properties if not force_auto_schema else None),
+                object_ttl_config=object_ttl_config,
+                properties=None,
             )
         except Exception as e:
 
@@ -637,7 +610,7 @@ class CollectionManager:
 
     def update_collection(
         self,
-        collection: str = UpdateCollectionDefaults.collection,
+        collection: Optional[str] = UpdateCollectionDefaults.collection,
         description: Optional[str] = UpdateCollectionDefaults.description,
         vector_index: Optional[str] = UpdateCollectionDefaults.vector_index,
         training_limit: int = UpdateCollectionDefaults.training_limit,
@@ -664,6 +637,8 @@ class CollectionManager:
         async_replication_config: Optional[Dict[str, int]] = None,
     ) -> None:
 
+        if not collection:
+            raise Exception("Error: Collection name is required.")
         if (
             object_ttl_type not in ("property", "disable")
             and object_ttl_property_name
@@ -671,6 +646,14 @@ class CollectionManager:
         ):
             raise Exception(
                 "object_ttl_property_name is only valid when object_ttl_type is 'property'."
+            )
+        if (
+            object_ttl_type == "property"
+            and object_ttl_time is not None
+            and not object_ttl_property_name
+        ):
+            raise Exception(
+                "object_ttl_property_name is required when object_ttl_type is 'property'."
             )
         if async_replication_config is not None and async_enabled is False:
             raise Exception(
@@ -717,23 +700,26 @@ class CollectionManager:
             ),
         }
 
-        object_ttl_type_map: Dict[str, wvc.ObjectTTLType] = {
-            "create": wvc.Reconfigure.ObjectTTL.delete_by_creation_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "update": wvc.Reconfigure.ObjectTTL.delete_by_update_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "property": wvc.Reconfigure.ObjectTTL.delete_by_date_property(
-                property_name=object_ttl_property_name
-                or UpdateCollectionDefaults.object_ttl_property_name,
-                ttl_offset=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "disable": wvc.Reconfigure.ObjectTTL.disable(),
-        }
+        object_ttl_config = None
+        if object_ttl_type == "disable":
+            object_ttl_config = wvc.Reconfigure.ObjectTTL.disable()
+        elif object_ttl_time is not None:
+            if object_ttl_type == "create":
+                object_ttl_config = wvc.Reconfigure.ObjectTTL.delete_by_creation_time(
+                    time_to_live=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
+            elif object_ttl_type == "update":
+                object_ttl_config = wvc.Reconfigure.ObjectTTL.delete_by_update_time(
+                    time_to_live=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
+            elif object_ttl_type == "property":
+                object_ttl_config = wvc.Reconfigure.ObjectTTL.delete_by_date_property(
+                    property_name=object_ttl_property_name,
+                    ttl_offset=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
 
         col_obj: Collection = self.client.collections.get(collection)
         rf = (
@@ -789,11 +775,7 @@ class CollectionManager:
                 if mt
                 else None
             ),
-            object_ttl_config=(
-                object_ttl_type_map[object_ttl_type]
-                if object_ttl_time is not None or object_ttl_type == "disable"
-                else None
-            ),
+            object_ttl_config=object_ttl_config,
         )
 
         assert self.client.collections.exists(collection)
@@ -813,10 +795,14 @@ class CollectionManager:
 
     def delete_collection(
         self,
-        collection: str = DeleteCollectionDefaults.collection,
+        collection: Optional[str] = DeleteCollectionDefaults.collection,
         all: bool = DeleteCollectionDefaults.all,
         json_output: bool = False,
     ) -> None:
+        if not all and not collection:
+            raise Exception(
+                "Error: Collection name is required unless --all is specified."
+            )
         if all:
             collections: List[str] = self.client.collections.list_all()
             for collection in collections:
