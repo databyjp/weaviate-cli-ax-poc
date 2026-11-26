@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -52,7 +53,7 @@ def test_main_commands_registered():
     assert "restore" in main.commands
     assert "query" in main.commands
     assert "benchmark" not in main.commands
-    assert "data" not in main.commands["create"].commands
-    assert "data" not in main.commands["delete"].commands
-    assert "data" not in main.commands["update"].commands
-    assert "data" not in main.commands["query"].commands
+    for name in ("create", "delete", "update", "query"):
+        group = main.commands[name]
+        assert isinstance(group, click.Group)
+        assert "data" not in group.commands

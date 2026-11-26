@@ -57,7 +57,7 @@ class AliasManager:
         except Exception as e:
             raise Exception(f"Error updating alias '{alias_name}': {e}")
 
-    def get_alias(self, alias_name: str) -> AliasReturn:
+    def get_alias(self, alias_name: str) -> AliasReturn | None:
         try:
             return self.client.alias.get(alias_name=alias_name)
         except Exception as e:

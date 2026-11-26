@@ -351,18 +351,11 @@ def _make_backup_status_mock(
     path: str = "/backups/my-backup",
     status: str = "SUCCESS",
 ) -> MagicMock:
-    """
-    Creates a mock backup status object without dict-like 'collections' key support.
-
-    The production code checks `if "collections" in backup`, which calls __contains__.
-    We use a plain MagicMock (no spec) and configure __contains__ to return False so
-    that the `collections` branch is skipped, keeping the output predictable.
-    """
+    """Return a status response without collection details."""
     mock_status = MagicMock()
     mock_status.backup_id = backup_id
     mock_status.path = path
     mock_status.status = status
-    mock_status.__contains__ = MagicMock(return_value=False)
     return mock_status
 
 

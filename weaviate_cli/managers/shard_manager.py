@@ -130,6 +130,8 @@ class ShardManager:
         shards (str): A comma-separated list of shard names to update. If empty, all shards in the collection will be updated.
         all (bool): If True, update shards in all collections. Cannot be used with specific collection or shards.
         """
+        if status != "READY" and status != "READONLY":
+            raise ValueError("Shard status must be READY or READONLY.")
         if all:
             if collection is not None:
                 raise Exception("Cannot use 'all' flag with specific collection")

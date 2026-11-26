@@ -231,18 +231,24 @@ def get_role_cli(ctx, role_name, user_name, user_type, all, json_output):
         role_man = RoleManager(client)
         roles: list[Role] = []
         if all:
-            roles = role_man.get_all_roles().values()
+            roles.extend(role_man.get_all_roles().values())
         else:
             if role_name:
-                roles.append(role_man.get_role(role_name=role_name))
+                role = role_man.get_role(role_name=role_name)
+                if role is None:
+                    raise ValueError(f"Role '{role_name}' not found.")
+                roles.append(role)
             elif user_name:
                 roles_names_from_user = role_man.get_roles_from_user(
                     user_name=user_name, user_type=user_type
                 ).keys()
                 for user_role_name in roles_names_from_user:
-                    roles.append(role_man.get_role(role_name=user_role_name))
+                    role = role_man.get_role(role_name=user_role_name)
+                    if role is None:
+                        raise ValueError(f"Role '{user_role_name}' not found.")
+                    roles.append(role)
             else:
-                roles = role_man.role_of_current_user().values()
+                roles.extend(role_man.role_of_current_user().values())
         if len(roles) == 0:
             if json_output:
                 click.echo(json.dumps({"roles": []}, indent=2))
@@ -338,6 +344,8 @@ def get_user_cli(
                         user_man.print_user(user)
         elif user_name:
             user = user_man.get_user(user_name=user_name)
+            if user is None:
+                raise ValueError(f"User '{user_name}' not found.")
             user_man.print_db_user(user, json_output=json_output)
         else:
             user = user_man.get_user()
@@ -488,7 +496,7 @@ def get_alias_cli(
                     for alias in aliases.values():
                         alias_man.print_alias(alias)
                         click.echo(f"\n{separator}")
-        else:
+        elif alias_name:
             alias = alias_man.get_alias(alias_name=alias_name)
             if alias:
                 if not json_output:

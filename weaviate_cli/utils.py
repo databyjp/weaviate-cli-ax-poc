@@ -319,7 +319,7 @@ def _create_permission(
     role_scope: str | None = None,
     user: str | Sequence[str] = "*",
     collection: str | Sequence[str] = "*",
-    tenant: str | Sequence[str] = "*",
+    tenant: str | Sequence[str] | None = "*",
     alias: str | Sequence[str] = "*",
     verbosity: str = "minimal",
 ) -> PermissionsCreateType:

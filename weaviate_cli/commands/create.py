@@ -229,7 +229,7 @@ def create_collection_cli(
     auto_tenant_creation: bool,
     auto_tenant_activation: bool,
     shards: int,
-    vectorizer: str | None,
+    vectorizer: str,
     vectorizer_base_url: str | None,
     replication_deletion_strategy: str | None,
     named_vector: bool,

@@ -68,7 +68,7 @@ class CollectionManager:
                 if schema.vector_config and not schema.vectorizer:
                     named_vectors = "True"
                     first_vector = next(iter(schema.vector_config.values()))
-                    vectorizer = first_vector.vectorizer.vectorizer.value
+                    vectorizer = first_vector.vectorizer.vectorizer
                     if not schema.vector_index_type:
                         vector_index_type = (
                             first_vector.vector_index_config.vector_index_type()
@@ -76,14 +76,15 @@ class CollectionManager:
                     else:
                         vector_index_type = schema.vector_index_type
                 else:
-                    vectorizer = (
-                        schema.vectorizer.value if schema.vectorizer else "None"
-                    )
+                    vectorizer = schema.vectorizer or "None"
                     vector_index_type = (
                         schema.vector_index_type.value
                         if schema.vector_index_type
                         else "None"
                     )
+
+                if isinstance(vectorizer, wvc.Vectorizers):
+                    vectorizer = vectorizer.value
 
                 tenant_count = (
                     len(col_obj.tenants.get())
@@ -279,7 +280,7 @@ class CollectionManager:
 
         distance_metric_enum = self._resolve_distance_metric(distance_metric)
 
-        vector_index_map: dict[str, wvc.VectorIndexConfig] = {
+        vector_index_map = {
             "hnsw": wvc.Configure.VectorIndex.hnsw(
                 distance_metric=distance_metric_enum
             ),
@@ -492,13 +493,14 @@ class CollectionManager:
                     filter_expired_objects=object_ttl_filter_expired,
                 )
             elif object_ttl_type == "property":
+                assert object_ttl_property_name
                 object_ttl_config = wvc.Configure.ObjectTTL.delete_by_date_property(
                     property_name=object_ttl_property_name,
                     ttl_offset=object_ttl_time,
                     filter_expired_objects=object_ttl_filter_expired,
                 )
 
-        vectorizer_map: dict[str, wvc.VectorizerConfig] = {}
+        vectorizer_map = {}
         if named_vector:
             # Common arguments for named vectors
             named_vector_args = {
@@ -524,7 +526,7 @@ class CollectionManager:
             ) in vectorizers_config.items():
                 vectorizer_map[name] = default_func(**params)
 
-        inverted_index_map: dict[str, wvc.InvertedIndexConfig] = {
+        inverted_index_map = {
             "timestamp": wvc.Configure.inverted_index(index_timestamps=True),
             "null": wvc.Configure.inverted_index(index_null_state=True),
             "length": wvc.Configure.inverted_index(index_property_length=True),
@@ -666,7 +668,7 @@ class CollectionManager:
                 f"Error: Collection '{collection}' does not exist in Weaviate. Create first using ./create_collection.py"
             )
 
-        vector_index_map: dict[str, wvc.VectorIndexConfig] = {
+        vector_index_map = {
             "hnsw": wvc.Reconfigure.VectorIndex.hnsw(),
             "flat": wvc.Reconfigure.VectorIndex.flat(),
             "hnsw_pq": wvc.Reconfigure.VectorIndex.hnsw(
@@ -789,12 +791,8 @@ class CollectionManager:
         all: bool = DeleteCollectionDefaults.all,
         json_output: bool = False,
     ) -> None:
-        if not all and not collection:
-            raise Exception(
-                "Error: Collection name is required unless --all is specified."
-            )
         if all:
-            collections: list[str] = self.client.collections.list_all()
+            collections = self.client.collections.list_all()
             for col_name in collections:
                 if not json_output:
                     click.echo(f"Deleting collection '{col_name}'")
@@ -812,6 +810,10 @@ class CollectionManager:
             else:
                 click.echo("All collections deleted successfully in Weaviate.")
         else:
+            if not collection:
+                raise Exception(
+                    "Error: Collection name is required unless --all is specified."
+                )
             if self.client.collections.exists(collection):
                 try:
                     self.client.collections.delete(collection)

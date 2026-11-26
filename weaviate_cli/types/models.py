@@ -20,7 +20,7 @@ class ShardInfo:
     collection: str
     node_objects: dict[str, int]  # node_name -> object_count
     vector_indexing_status: str
-    loaded: bool
+    loaded: bool | None
 
 
 @dataclass

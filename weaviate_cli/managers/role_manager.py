@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 
 import click
 from weaviate import WeaviateClient
@@ -55,7 +56,7 @@ class RoleManager:
 
     def get_roles_from_user(
         self, user_name: str, user_type: str = GetRoleDefaults.user_type
-    ) -> dict[str, RoleBase]:
+    ) -> Mapping[str, RoleBase]:
         try:
             if older_than_version(self.client, "1.30.0"):
                 return self.client.users.get_assigned_roles(user_id=user_name)
@@ -67,6 +68,7 @@ class RoleManager:
                 return self.client.users.oidc.get_assigned_roles(
                     user_id=user_name, include_permissions=False
                 )
+            raise ValueError(f"Unsupported user type: {user_type}")
         except Exception as e:
             raise Exception(
                 f"Error getting roles from {user_type} user '{user_name}': {e}"
@@ -109,7 +111,7 @@ class RoleManager:
             raise Exception(f"Error getting role of current user: {e}")
 
     def add_permission(
-        self, permission: str, role_name: str, json_output: bool = False
+        self, permission: tuple[str, ...], role_name: str, json_output: bool = False
     ) -> None:
         try:
             rbac_permissions = []
@@ -140,7 +142,7 @@ class RoleManager:
             )
 
     def revoke_permission(
-        self, permission: str, role_name: str, json_output: bool = False
+        self, permission: tuple[str, ...], role_name: str, json_output: bool = False
     ) -> None:
         try:
             rbac_permissions = []

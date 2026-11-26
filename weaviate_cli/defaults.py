@@ -148,7 +148,7 @@ class GetShardsDefaults:
 class GetRoleDefaults:
     role_name: str | None = None
     user_name: str | None = None
-    user_type: str | None = "db"
+    user_type: str = "db"
 
 
 @dataclass

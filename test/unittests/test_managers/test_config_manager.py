@@ -24,8 +24,8 @@ def test_create_default_config():
         mock_exists.return_value = False
         config = ConfigManager()
         assert config.config["host"] == "localhost"
-        assert config.config["http_port"] == "8080"
-        assert config.config["grpc_port"] == "50051"
+        assert config.config.get("http_port") == "8080"
+        assert config.config.get("grpc_port") == "50051"
 
 
 @patch("socket.create_connection")
@@ -34,7 +34,7 @@ def test_check_host_docker_internal(mock_socket):
 
     # Test successful connection
     mock_socket.return_value = MagicMock()
-    assert config._ConfigManager__check_host_docker_internal() is True
+    assert config._check_host_docker_internal() is True
 
 
 @patch("socket.create_connection")
@@ -43,7 +43,7 @@ def test_check_host_docker_internal_failed(mock_socket):
 
     # Test failed connection
     mock_socket.side_effect = OSError()
-    assert config._ConfigManager__check_host_docker_internal() is False
+    assert config._check_host_docker_internal() is False
 
 
 def test_init_with_user():

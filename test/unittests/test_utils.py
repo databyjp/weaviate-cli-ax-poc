@@ -358,6 +358,7 @@ def test_parse_async_replication_config_all_keys():
         "propagation_batch_size=14",
     )
     result = parse_async_replication_config(all_keys)
+    assert result is not None
     assert len(result) == 14
     assert result["max_workers"] == 1
     assert result["propagation_batch_size"] == 14

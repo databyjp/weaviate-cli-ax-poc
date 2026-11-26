@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 from pathlib import Path
+from typing import Literal, TypedDict, overload
 from urllib.parse import urlparse
 
 import click
@@ -10,6 +11,18 @@ import weaviate
 from weaviate.config import AdditionalConfig
 from weaviate.config import Timeout as WeaviateTimeout
 from weaviate.exceptions import WeaviateGRPCUnavailableError
+
+
+class _ConnectionConfig(TypedDict):
+    host: str
+
+
+class _Config(_ConnectionConfig, total=False):
+    http_port: int | str
+    grpc_port: int | str
+    grpc_host: str
+    auth: dict[str, str]
+    headers: dict[str, str]
 
 
 class ConfigManager:
@@ -32,17 +45,13 @@ class ConfigManager:
             self.config_path: str | Path = config_file
             with open(self.config_path, "r", encoding="utf-8") as config_data:
                 try:
-                    self.config: dict[str, str | dict[str, str]] = json.load(
-                        config_data
-                    )
+                    self.config: _Config = json.load(config_data)
                 except json.JSONDecodeError:
                     click.echo("Fatal Error: Config file is not valid JSON!")
                     sys.exit(1)
         else:
-            self.config_path = Path(
-                os.path.join(
-                    os.getenv("HOME"), self.default_file_path, self.default_file_name
-                )
+            self.config_path = (
+                Path.home() / self.default_file_path / self.default_file_name
             )
 
             if self.config_path.exists():
@@ -61,7 +70,7 @@ class ConfigManager:
             "grpc_port": f"{self.default_grpc_port}",
         }
 
-    def __check_host_docker_internal(self, port: int = 8080) -> bool:
+    def _check_host_docker_internal(self, port: int = 8080) -> bool:
         """Check if host.docker.internal is reachable."""
         try:
             # Attempt to connect to host.docker.internal on any port (e.g., 80)
@@ -73,7 +82,7 @@ class ConfigManager:
 
     def __get_host(self, port: int = 8080) -> str:
         """Determine the appropriate host based on the environment."""
-        if self.__check_host_docker_internal(port):
+        if self._check_host_docker_internal(port):
             return "host.docker.internal"  # macOS/Windows Docker
         else:
             return "localhost"  # Default fallback (Linux or unreachable)
@@ -102,6 +111,16 @@ class ConfigManager:
         """Get asynchronous weaviate client from config"""
         return self._create_client(async_client=True)
 
+    @overload
+    def _create_client(
+        self, async_client: Literal[False]
+    ) -> weaviate.WeaviateClient: ...
+
+    @overload
+    def _create_client(
+        self, async_client: Literal[True]
+    ) -> weaviate.WeaviateAsyncClient: ...
+
     def _create_client(
         self, async_client: bool
     ) -> weaviate.WeaviateClient | weaviate.WeaviateAsyncClient:
@@ -128,8 +147,10 @@ class ConfigManager:
 
         # Localhost handling uses special helpers
         if self.config["host"] == "localhost":
+            if "http_port" not in self.config or "grpc_port" not in self.config:
+                raise ValueError("Local connections require http_port and grpc_port.")
             common_kwargs = {
-                "host": self.__get_host(self.config["http_port"]),
+                "host": self.__get_host(int(self.config["http_port"])),
                 "port": self.config["http_port"],
                 "grpc_port": self.config["grpc_port"],
                 "auth_credentials": auth_config,
@@ -170,6 +191,8 @@ class ConfigManager:
                     )
 
         # Custom host handling (URL vs hostname/IP)
+        if "grpc_host" not in self.config:
+            raise ValueError("Custom connections require grpc_host.")
         if self.__is_url(self.config["host"]):
             host_parsed = urlparse(self.config["host"])
             grpc_parsed = urlparse(self.config["grpc_host"])
@@ -195,6 +218,8 @@ class ConfigManager:
                 "additional_config": additional_config,
             }
         else:
+            if "http_port" not in self.config or "grpc_port" not in self.config:
+                raise ValueError("Custom hostnames require http_port and grpc_port.")
             common_kwargs = {
                 "http_host": self.config["host"],
                 "grpc_host": self.config["grpc_host"],

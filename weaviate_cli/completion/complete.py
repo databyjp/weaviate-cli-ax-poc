@@ -16,7 +16,7 @@ def get_config_parameter(ctx, args, incomplete):
         idx = args.index("--config-file")
         config_file = args[idx + 1]
 
-    return os.path.expanduser(config_file)
+    return os.path.expanduser(config_file) if config_file is not None else None
 
 
 def get_user_parameter(ctx, args, incomplete):
@@ -29,7 +29,7 @@ def get_user_parameter(ctx, args, incomplete):
     return user
 
 
-def role_name_complete(ctx: click.Context, param: str, incomplete: str) -> [str]:
+def role_name_complete(ctx: click.Context, param: str, incomplete: str) -> list[str]:
     config = get_config_parameter(ctx, param, incomplete)
     user = get_user_parameter(ctx, param, incomplete)
     ctx.obj = {"config": ConfigManager(config, user)}
@@ -47,7 +47,9 @@ def role_name_complete(ctx: click.Context, param: str, incomplete: str) -> [str]
     return role_names
 
 
-def collection_name_complete(ctx: click.Context, param: str, incomplete: str) -> [str]:
+def collection_name_complete(
+    ctx: click.Context, param: str, incomplete: str
+) -> list[str]:
     config = get_config_parameter(ctx, param, incomplete)
     user = get_user_parameter(ctx, param, incomplete)
     ctx.obj = {"config": ConfigManager(config, user)}
