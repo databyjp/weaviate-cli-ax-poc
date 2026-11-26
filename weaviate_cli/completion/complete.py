@@ -1,5 +1,4 @@
 import os
-import sys
 
 import click
 from click.parser import split_arg_string

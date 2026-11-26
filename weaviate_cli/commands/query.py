@@ -1,18 +1,16 @@
 import sys
+
 import click
-
-from typing import Optional
-
-from weaviate_cli.utils import get_client_from_context
-from weaviate_cli.managers.cluster_manager import ClusterManager
 from weaviate.exceptions import WeaviateConnectionError
+
+from weaviate_cli.managers.cluster_manager import ClusterManager
+from weaviate_cli.utils import get_client_from_context
 
 
 # Query Group
 @click.group()
 def query() -> None:
     """Query resources in Weaviate."""
-    pass
 
 
 @query.command(
@@ -49,9 +47,9 @@ def query() -> None:
 @click.pass_context
 def query_replications_cli(
     ctx: click.Context,
-    collection: Optional[str],
-    shard: Optional[str],
-    target_node: Optional[str],
+    collection: str | None,
+    shard: str | None,
+    target_node: str | None,
     history: bool,
     json_output: bool,
 ) -> None:
@@ -114,7 +112,7 @@ def query_replications_cli(
 def query_sharding_state_cli(
     ctx: click.Context,
     collection: str,
-    shard: Optional[str],
+    shard: str | None,
     json_output: bool,
 ):
     """Query the sharding state of a COLLECTION in Weaviate."""

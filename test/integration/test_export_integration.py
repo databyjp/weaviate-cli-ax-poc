@@ -1,11 +1,12 @@
 import json
+
 import click
 import pytest
 import weaviate
+
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.config_manager import ConfigManager
 from weaviate_cli.managers.export_manager import ExportManager
-
 
 EXPORT_COLLECTION = "ExportTestCollection"
 

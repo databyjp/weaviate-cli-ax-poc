@@ -1,8 +1,9 @@
 import json
-from typing import List, Optional, Dict, Union
+
 import click
 from weaviate import WeaviateClient
-from weaviate.users.users import OwnUser, UserDB, UserTypes
+from weaviate.users.users import OwnUser, UserDB
+
 from weaviate_cli.defaults import (
     GetUserDefaults,
 )
@@ -15,7 +16,7 @@ class UserManager:
 
     def get_user_from_role(
         self, role_name: str = GetUserDefaults.role_name
-    ) -> List[str]:
+    ) -> list[str]:
         """Get all roles assigned to a user."""
         try:
             return self.client.roles.get_assigned_user_ids(role_name=role_name)
@@ -24,8 +25,8 @@ class UserManager:
 
     def get_user(
         self,
-        user_name: Optional[str] = None,
-    ) -> Union[OwnUser, UserDB]:
+        user_name: str | None = None,
+    ) -> OwnUser | UserDB:
         """Get a user in Weaviate. If no user name is provided, the current user is returned."""
 
         try:
@@ -36,7 +37,7 @@ class UserManager:
         except Exception as e:
             raise Exception(f"Error getting user '{user_name}': {e}")
 
-    def get_all_users(self) -> List[UserDB]:
+    def get_all_users(self) -> list[UserDB]:
         """Get all users in Weaviate."""
         try:
             return self.client.users.db.list_all()
@@ -45,7 +46,7 @@ class UserManager:
 
     def create_user(
         self,
-        user_name: Optional[str] = None,
+        user_name: str | None = None,
     ) -> str:
         """
         Create a user in Weaviate.
@@ -60,11 +61,11 @@ class UserManager:
 
     def update_user(
         self,
-        user_name: Optional[str] = None,
+        user_name: str | None = None,
         rotate_api_key: bool = False,
         activate: bool = False,
         deactivate: bool = False,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Update a user in Weaviate.
         Returns the api key for the user if the api key was rotated, otherwise returns None.
         """
@@ -88,7 +89,7 @@ class UserManager:
 
     def delete_user(
         self,
-        user_name: Optional[str] = None,
+        user_name: str | None = None,
     ) -> None:
         """Delete a user in Weaviate."""
         if user_name is None:
@@ -196,11 +197,11 @@ class UserManager:
             )
             return
         print(f"User: {user.user_id}")
-        print(f"Roles:")
+        print("Roles:")
         if len(user.roles) == 0:
-            print(f" - No roles assigned")
+            print(" - No roles assigned")
         else:
-            for role in user.roles.keys():
+            for role in user.roles:
                 print(f" - Role: {role}")
 
     def print_db_user(self, user: UserDB, json_output: bool = False) -> None:
@@ -221,9 +222,9 @@ class UserManager:
         print(f"User: {user.user_id}")
         print(f"Active: {'Yes' if user.active else 'No'}")
         print(f"Type: {user.user_type.name}")
-        print(f"Roles:")
+        print("Roles:")
         if len(user.role_names) == 0:
-            print(f" - No roles assigned")
+            print(" - No roles assigned")
         else:
             for role in user.role_names:
                 print(f" - Role: {role}")

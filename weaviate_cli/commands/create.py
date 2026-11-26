@@ -1,35 +1,34 @@
-import sys
-import click
-from typing import Optional, Tuple
 import json
+import sys
 
+import click
 from weaviate import WeaviateClient
+from weaviate.exceptions import WeaviateConnectionError
 
 from weaviate_cli.completion.complete import (
-    role_name_complete,
     collection_name_complete,
+    role_name_complete,
 )
-from weaviate_cli.managers.alias_manager import AliasManager
-from weaviate_cli.managers.backup_manager import BackupManager
-from weaviate_cli.managers.export_manager import ExportManager
-from weaviate_cli.utils import (
-    get_client_from_context,
-    parse_async_replication_config,
-    ASYNC_REPLICATION_CONFIG_HELP,
-)
-from weaviate_cli.managers.collection_manager import CollectionManager
-from weaviate_cli.managers.tenant_manager import TenantManager
-from weaviate_cli.managers.cluster_manager import ClusterManager
-from weaviate_cli.managers.role_manager import RoleManager
-from weaviate_cli.managers.user_manager import UserManager
-from weaviate.exceptions import WeaviateConnectionError
 from weaviate_cli.defaults import (
+    PERMISSION_HELP_STRING,
     CreateBackupDefaults,
     CreateCollectionDefaults,
     CreateExportCollectionDefaults,
-    CreateTenantsDefaults,
     CreateRoleDefaults,
-    PERMISSION_HELP_STRING,
+    CreateTenantsDefaults,
+)
+from weaviate_cli.managers.alias_manager import AliasManager
+from weaviate_cli.managers.backup_manager import BackupManager
+from weaviate_cli.managers.cluster_manager import ClusterManager
+from weaviate_cli.managers.collection_manager import CollectionManager
+from weaviate_cli.managers.export_manager import ExportManager
+from weaviate_cli.managers.role_manager import RoleManager
+from weaviate_cli.managers.tenant_manager import TenantManager
+from weaviate_cli.managers.user_manager import UserManager
+from weaviate_cli.utils import (
+    ASYNC_REPLICATION_CONFIG_HELP,
+    get_client_from_context,
+    parse_async_replication_config,
 )
 
 
@@ -37,7 +36,6 @@ from weaviate_cli.defaults import (
 @click.group()
 def create() -> None:
     """Create resources in Weaviate."""
-    pass
 
 
 # Subcommand to create a collection
@@ -225,28 +223,28 @@ def create_collection_cli(
     replication_factor: int,
     async_enabled: bool,
     vector_index: str,
-    inverted_index: Optional[str],
+    inverted_index: str | None,
     training_limit: int,
     multitenant: bool,
     auto_tenant_creation: bool,
     auto_tenant_activation: bool,
     shards: int,
-    vectorizer: Optional[str],
-    vectorizer_base_url: Optional[str],
-    replication_deletion_strategy: Optional[str],
+    vectorizer: str | None,
+    vectorizer_base_url: str | None,
+    replication_deletion_strategy: str | None,
     named_vector: bool,
-    named_vector_name: Optional[str],
-    hfresh_max_posting_size_kb: Optional[int],
-    hfresh_replicas: Optional[int],
-    hfresh_search_probe: Optional[int],
-    distance_metric: Optional[str],
-    rescore_limit: Optional[int],
+    named_vector_name: str | None,
+    hfresh_max_posting_size_kb: int | None,
+    hfresh_replicas: int | None,
+    hfresh_search_probe: int | None,
+    distance_metric: str | None,
+    rescore_limit: int | None,
     json_output: bool,
     object_ttl_type: str,
-    object_ttl_time: Optional[int],
+    object_ttl_time: int | None,
     object_ttl_filter_expired: bool,
-    object_ttl_property_name: Optional[str],
-    async_replication_config: Tuple[str, ...],
+    object_ttl_property_name: str | None,
+    async_replication_config: tuple[str, ...],
 ) -> None:
     """Create a collection in Weaviate."""
 
@@ -359,7 +357,7 @@ def create_tenants_cli(
 ):
     """Create tenants in Weaviate."""
 
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         tenant_manager = TenantManager(client)
@@ -437,7 +435,7 @@ def create_backup_cli(
 ):
     """Create a backup in Weaviate."""
 
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         backup_manager = BackupManager(client)
@@ -483,7 +481,7 @@ def create_role_cli(
     ctx: click.Context, role_name: str, permission: tuple[str], json_output: bool
 ) -> None:
     """Create a role in Weaviate."""
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         role_man = RoleManager(client)
@@ -658,15 +656,15 @@ def create_alias_cli(
 @click.pass_context
 def create_replication_cli(
     ctx: click.Context,
-    collection: Optional[str],
-    shard: Optional[str],
-    source_node: Optional[str],
-    target_node: Optional[str],
+    collection: str | None,
+    shard: str | None,
+    source_node: str | None,
+    target_node: str | None,
     type_: str,
     json_output: bool,
 ) -> None:
     """Create and start a replication operation in Weaviate."""
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
 
     if collection is None:
         click.echo("No collection provided. Please provide the name of the collection.")
@@ -763,13 +761,13 @@ def create_export_collection_cli(
     export_id: str,
     backend: str,
     file_format: str,
-    include: Optional[str],
-    exclude: Optional[str],
+    include: str | None,
+    exclude: str | None,
     wait: bool,
     json_output: bool,
 ) -> None:
     """Create a collection export in Weaviate."""
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         export_manager = ExportManager(client)

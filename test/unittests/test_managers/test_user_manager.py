@@ -1,8 +1,9 @@
 import json
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, patch
+
 from weaviate_cli.managers.user_manager import UserManager
-from weaviate.exceptions import WeaviateConnectionError
 
 
 @pytest.fixture

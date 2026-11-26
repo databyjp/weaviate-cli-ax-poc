@@ -1,14 +1,15 @@
 import json
-import semver
+
 import click
-from typing import Optional
+import semver
 from weaviate.backup.backup import BackupConfigCreate
 from weaviate.client import WeaviateClient
+
 from weaviate_cli.defaults import (
     CancelBackupDefaults,
     CreateBackupDefaults,
-    RestoreBackupDefaults,
     GetBackupDefaults,
+    RestoreBackupDefaults,
 )
 
 
@@ -20,14 +21,14 @@ class BackupManager:
         self,
         backup_id: str = CreateBackupDefaults.backup_id,
         backend: str = CreateBackupDefaults.backend,
-        include: Optional[str] = CreateBackupDefaults.include,
-        exclude: Optional[str] = CreateBackupDefaults.exclude,
+        include: str | None = CreateBackupDefaults.include,
+        exclude: str | None = CreateBackupDefaults.exclude,
         wait: bool = CreateBackupDefaults.wait,
         cpu_for_backup: int = CreateBackupDefaults.cpu_for_backup,
         json_output: bool = False,
-        incremental_base_backup_id: Optional[
-            str
-        ] = CreateBackupDefaults.incremental_base_backup_id,
+        incremental_base_backup_id: (
+            str | None
+        ) = CreateBackupDefaults.incremental_base_backup_id,
     ) -> None:
 
         version = semver.Version.parse(self.client.get_meta()["version"])
@@ -82,8 +83,8 @@ class BackupManager:
         self,
         backup_id: str = RestoreBackupDefaults.backup_id,
         backend: str = RestoreBackupDefaults.backend,
-        include: Optional[str] = RestoreBackupDefaults.include,
-        exclude: Optional[str] = RestoreBackupDefaults.exclude,
+        include: str | None = RestoreBackupDefaults.include,
+        exclude: str | None = RestoreBackupDefaults.exclude,
         wait: bool = RestoreBackupDefaults.wait,
         override_alias: bool = RestoreBackupDefaults.override_alias,
         json_output: bool = False,

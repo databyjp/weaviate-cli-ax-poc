@@ -1,16 +1,16 @@
 import sys
+
 import click
+
+from weaviate_cli.defaults import RestoreBackupDefaults
 from weaviate_cli.managers.backup_manager import BackupManager
 from weaviate_cli.utils import get_client_from_context
-from weaviate.exceptions import WeaviateConnectionError
-from weaviate_cli.defaults import RestoreBackupDefaults
 
 
 # Restore Group
 @click.group()
 def restore() -> None:
     """Restore backups in Weaviate."""
-    pass
 
 
 @restore.command("backup")

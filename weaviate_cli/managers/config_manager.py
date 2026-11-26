@@ -1,15 +1,15 @@
+import json
+import os
+import socket
+import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 import click
-import json
-import os
-import sys
-import socket
 import weaviate
+from weaviate.config import AdditionalConfig
+from weaviate.config import Timeout as WeaviateTimeout
 from weaviate.exceptions import WeaviateGRPCUnavailableError
-from pathlib import Path
-from typing import Dict, Optional, Union
-from weaviate.config import AdditionalConfig, Timeout as WeaviateTimeout
 
 
 class ConfigManager:
@@ -23,22 +23,20 @@ class ConfigManager:
     default_port: int = 8080
     default_grpc_port: int = 50051
 
-    def __init__(
-        self, config_file: Optional[str] = None, user: Optional[str] = None
-    ) -> None:
+    def __init__(self, config_file: str | None = None, user: str | None = None) -> None:
         """Initialize config manager with optional config file path"""
         self.user = user
         if config_file:
             assert os.path.isfile(
                 config_file
             ), f"Config file '{config_file}' does not exist!"
-            self.config_path: Union[str, Path] = config_file
+            self.config_path: str | Path = config_file
             with open(self.config_path, "r", encoding="utf-8") as config_data:
                 try:
-                    self.config: Dict[str, Union[str, Dict[str, str]]] = json.load(
+                    self.config: dict[str, str | dict[str, str]] = json.load(
                         config_data
                     )
-                except:
+                except json.JSONDecodeError:
                     click.echo("Fatal Error: Config file is not valid JSON!")
                     sys.exit(1)
         else:
@@ -49,8 +47,10 @@ class ConfigManager:
             )
 
             if self.config_path.exists():
-                with open(self.config_path, "r", encoding="utf-8") as config_file:
-                    self.config = json.load(config_file)
+                with open(
+                    self.config_path, "r", encoding="utf-8"
+                ) as default_config_file:
+                    self.config = json.load(default_config_file)
             else:
                 self.create_default_config()
 
@@ -69,7 +69,7 @@ class ConfigManager:
             fd = socket.create_connection(("host.docker.internal", port), timeout=2)
             fd.close()  # Close the socket
             return True
-        except (socket.timeout, socket.error):
+        except (TimeoutError, OSError):
             return False
 
     def __get_host(self, port: int = 8080) -> str:
@@ -105,12 +105,10 @@ class ConfigManager:
 
     def _create_client(
         self, async_client: bool
-    ) -> Union[weaviate.WeaviateClient, weaviate.WeaviateAsyncClient]:
+    ) -> weaviate.WeaviateClient | weaviate.WeaviateAsyncClient:
         """Internal method to create client based on async flag"""
-        auth_config: Optional[weaviate.auth.AuthCredentials] = None
-        additional_config: Optional[AdditionalConfig] = (
-            self.__additional_config_if_slow()
-        )
+        auth_config: weaviate.auth.AuthCredentials | None = None
+        additional_config: AdditionalConfig | None = self.__additional_config_if_slow()
 
         if "auth" in self.config:
             if self.config["auth"].get("type") == "user":
@@ -127,30 +125,30 @@ class ConfigManager:
                 )
 
         # Shared headers (may be None)
-        headers = self.config["headers"] if "headers" in self.config else None
+        headers = self.config.get("headers")
 
         # Localhost handling uses special helpers
         if self.config["host"] == "localhost":
-            common_kwargs = dict(
-                host=self.__get_host(self.config["http_port"]),
-                port=self.config["http_port"],
-                grpc_port=self.config["grpc_port"],
-                auth_credentials=auth_config,
-                headers=headers,
-                additional_config=additional_config,
-            )
+            common_kwargs = {
+                "host": self.__get_host(self.config["http_port"]),
+                "port": self.config["http_port"],
+                "grpc_port": self.config["grpc_port"],
+                "auth_credentials": auth_config,
+                "headers": headers,
+                "additional_config": additional_config,
+            }
             if async_client:
                 return weaviate.use_async_with_local(**common_kwargs)
             return weaviate.connect_to_local(**common_kwargs)
 
         # Weaviate Cloud handling with retry fallback
         if self.config["host"].endswith("weaviate.cloud"):
-            common_kwargs = dict(
-                cluster_url=self.config["host"],
-                auth_credentials=auth_config,
-                headers=headers,
-                additional_config=additional_config,
-            )
+            common_kwargs = {
+                "cluster_url": self.config["host"],
+                "auth_credentials": auth_config,
+                "headers": headers,
+                "additional_config": additional_config,
+            }
             if async_client:
                 try:
                     return weaviate.use_async_with_weaviate_cloud(**common_kwargs)
@@ -186,35 +184,35 @@ class ConfigManager:
                 if "grpc_port" not in self.config or self.config["grpc_port"] == ""
                 else self.config["grpc_port"]
             )
-            common_kwargs = dict(
-                http_host=host_parsed.hostname,
-                grpc_host=grpc_parsed.hostname,
-                grpc_secure=grpc_parsed.scheme == "https",
-                http_secure=host_parsed.scheme == "https",
-                http_port=http_port,
-                grpc_port=grpc_port,
-                auth_credentials=auth_config,
-                headers=headers,
-                additional_config=additional_config,
-            )
+            common_kwargs = {
+                "http_host": host_parsed.hostname,
+                "grpc_host": grpc_parsed.hostname,
+                "grpc_secure": grpc_parsed.scheme == "https",
+                "http_secure": host_parsed.scheme == "https",
+                "http_port": http_port,
+                "grpc_port": grpc_port,
+                "auth_credentials": auth_config,
+                "headers": headers,
+                "additional_config": additional_config,
+            }
         else:
-            common_kwargs = dict(
-                http_host=self.config["host"],
-                grpc_host=self.config["grpc_host"],
-                grpc_secure=self.config["grpc_port"] == 443,
-                http_secure=self.config["http_port"] == 443,
-                http_port=self.config["http_port"],
-                grpc_port=self.config["grpc_port"],
-                auth_credentials=auth_config,
-                headers=headers,
-                additional_config=additional_config,
-            )
+            common_kwargs = {
+                "http_host": self.config["host"],
+                "grpc_host": self.config["grpc_host"],
+                "grpc_secure": self.config["grpc_port"] == 443,
+                "http_secure": self.config["http_port"] == 443,
+                "http_port": self.config["http_port"],
+                "grpc_port": self.config["grpc_port"],
+                "auth_credentials": auth_config,
+                "headers": headers,
+                "additional_config": additional_config,
+            }
 
         if async_client:
             return weaviate.use_async_with_custom(**common_kwargs)
         return weaviate.connect_to_custom(**common_kwargs)
 
-    def __additional_config_if_slow(self) -> Optional[AdditionalConfig]:
+    def __additional_config_if_slow(self) -> AdditionalConfig | None:
         """Return AdditionalConfig with doubled timeouts when SLOW_CONNECTION is set."""
         env_flag = os.getenv("SLOW_CONNECTION")
         if not env_flag:

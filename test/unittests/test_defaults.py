@@ -1,30 +1,32 @@
+from unittest.mock import MagicMock
+
+import click
 import pytest
-from weaviate_cli.defaults import *
+from click.testing import CliRunner
 from weaviate.collections.classes.tenants import TenantActivityStatus
+
 from weaviate_cli.commands.create import (
+    create_backup_cli,
     create_collection_cli,
     create_tenants_cli,
-    create_backup_cli,
 )
 from weaviate_cli.commands.delete import (
     delete_collection_cli,
     delete_tenants_cli,
 )
 from weaviate_cli.commands.get import (
-    get_collection_cli,
-    get_tenants_cli,
-    get_shards_cli,
     get_backup_cli,
+    get_collection_cli,
+    get_shards_cli,
+    get_tenants_cli,
 )
 from weaviate_cli.commands.restore import restore_backup_cli
 from weaviate_cli.commands.update import (
     update_collection_cli,
-    update_tenants_cli,
     update_shards_cli,
+    update_tenants_cli,
 )
-from click.testing import CliRunner
-from unittest.mock import MagicMock
-import click
+from weaviate_cli.defaults import *
 
 
 @pytest.fixture

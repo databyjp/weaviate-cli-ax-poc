@@ -1,18 +1,19 @@
 import json
-import click
 import sys
-from weaviate_cli.utils import get_client_from_context
+
+import click
+
+from weaviate_cli.defaults import CancelBackupDefaults, CancelExportCollectionDefaults
 from weaviate_cli.managers.backup_manager import BackupManager
 from weaviate_cli.managers.cluster_manager import ClusterManager
 from weaviate_cli.managers.export_manager import ExportManager
-from weaviate_cli.defaults import CancelBackupDefaults, CancelExportCollectionDefaults
+from weaviate_cli.utils import get_client_from_context
 
 
 # Create Group
 @click.group()
 def cancel():
     """Cancel operations in Weaviate."""
-    pass
 
 
 @cancel.command("backup")

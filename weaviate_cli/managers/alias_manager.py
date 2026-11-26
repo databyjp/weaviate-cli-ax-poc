@@ -1,8 +1,8 @@
 import json
-from typing import Optional
+
 import click
-from weaviate.client import WeaviateClient
 from weaviate.aliases.alias import AliasReturn
+from weaviate.client import WeaviateClient
 
 
 class AliasManager:
@@ -81,7 +81,7 @@ class AliasManager:
         except Exception as e:
             raise Exception(f"Error deleting alias '{alias_name}': {e}")
 
-    def list_aliases(self, collection: Optional[str] = None) -> dict[str, AliasReturn]:
+    def list_aliases(self, collection: str | None = None) -> dict[str, AliasReturn]:
         try:
             return self.client.alias.list_all(collection=collection)
         except Exception as e:

@@ -1,6 +1,7 @@
 import json
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from weaviate_cli.managers.backup_manager import BackupManager
 

@@ -1,7 +1,8 @@
 import json
+from unittest.mock import MagicMock
+
 import click
 import pytest
-from unittest.mock import MagicMock
 
 from weaviate_cli.managers.export_manager import ExportManager
 

@@ -1,42 +1,40 @@
 import json
 import sys
-from typing import List, Optional
+
 import click
+from weaviate.rbac.models import Role
 
 from weaviate_cli.completion.complete import (
-    role_name_complete,
     collection_name_complete,
+    role_name_complete,
+)
+from weaviate_cli.defaults import (
+    GetAliasDefaults,
+    GetBackupDefaults,
+    GetCollectionDefaults,
+    GetExportCollectionDefaults,
+    GetNodesDefaults,
+    GetRoleDefaults,
+    GetShardsDefaults,
+    GetUserDefaults,
 )
 from weaviate_cli.managers.alias_manager import AliasManager
+from weaviate_cli.managers.backup_manager import BackupManager
+from weaviate_cli.managers.cluster_manager import ClusterManager
+from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.export_manager import ExportManager
+from weaviate_cli.managers.node_manager import NodeManager
 from weaviate_cli.managers.role_manager import RoleManager
+from weaviate_cli.managers.shard_manager import ShardManager
 from weaviate_cli.managers.tenant_manager import TenantManager
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.utils import get_client_from_context
-from weaviate_cli.managers.collection_manager import CollectionManager
-from weaviate_cli.managers.backup_manager import BackupManager
-from weaviate_cli.managers.cluster_manager import ClusterManager
-from weaviate_cli.managers.shard_manager import ShardManager
-from weaviate.rbac.models import Role
-from weaviate_cli.defaults import (
-    GetBackupDefaults,
-    GetExportCollectionDefaults,
-    GetTenantsDefaults,
-    GetShardsDefaults,
-    GetCollectionDefaults,
-    GetRoleDefaults,
-    GetUserDefaults,
-    GetNodesDefaults,
-    GetAliasDefaults,
-)
-from weaviate_cli.managers.node_manager import NodeManager
 
 
 # Get Group
 @click.group()
 def get():
     """Get resources from Weaviate."""
-    pass
 
 
 @get.command("collection")
@@ -231,7 +229,7 @@ def get_role_cli(ctx, role_name, user_name, user_type, all, json_output):
             )
         client = get_client_from_context(ctx)
         role_man = RoleManager(client)
-        roles: List[Role] = []
+        roles: list[Role] = []
         if all:
             roles = role_man.get_all_roles().values()
         else:
@@ -241,8 +239,8 @@ def get_role_cli(ctx, role_name, user_name, user_type, all, json_output):
                 roles_names_from_user = role_man.get_roles_from_user(
                     user_name=user_name, user_type=user_type
                 ).keys()
-                for role_name in roles_names_from_user:
-                    roles.append(role_man.get_role(role_name=role_name))
+                for user_role_name in roles_names_from_user:
+                    roles.append(role_man.get_role(role_name=user_role_name))
             else:
                 roles = role_man.role_of_current_user().values()
         if len(roles) == 0:
@@ -288,8 +286,8 @@ def get_role_cli(ctx, role_name, user_name, user_type, all, json_output):
 @click.pass_context
 def get_user_cli(
     ctx,
-    role_name: Optional[str],
-    user_name: Optional[str],
+    role_name: str | None,
+    user_name: str | None,
     all: bool,
     json_output: bool,
 ):
@@ -429,8 +427,8 @@ def get_nodes_cli(ctx, minimal, shards, collections, collection, json_output):
 @click.pass_context
 def get_alias_cli(
     ctx: click.Context,
-    alias_name: Optional[str],
-    collection: Optional[str],
+    alias_name: str | None,
+    collection: str | None,
     all: bool,
     json_output: bool,
 ) -> None:

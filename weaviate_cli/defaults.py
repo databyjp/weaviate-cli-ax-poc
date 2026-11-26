@@ -1,6 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional, List
-
 
 PERMISSION_HELP_STRING = (
     "Permission in format action:collection. Can be specified multiple times.\n\n"
@@ -51,49 +49,49 @@ PERMISSION_HELP_STRING = (
 
 @dataclass
 class CreateCollectionDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
     replication_factor: int = 1
     async_enabled: bool = False
     vector_index: str = "hnsw"
-    inverted_index: Optional[str] = None
+    inverted_index: str | None = None
     training_limit: int = 10000
     multitenant: bool = False
     auto_tenant_creation: bool = False
     auto_tenant_activation: bool = False
     shards: int = 0
     vectorizer: str = "none"
-    vectorizer_base_url: Optional[str] = None
-    replication_deletion_strategy: Optional[str] = None
+    vectorizer_base_url: str | None = None
+    replication_deletion_strategy: str | None = None
     named_vector: bool = False
-    named_vector_name: Optional[str] = "default"
-    hfresh_max_posting_size_kb: Optional[int] = None
-    hfresh_replicas: Optional[int] = None
-    hfresh_search_probe: Optional[int] = None
-    distance_metric: Optional[str] = None
-    rescore_limit: Optional[int] = None
+    named_vector_name: str | None = "default"
+    hfresh_max_posting_size_kb: int | None = None
+    hfresh_replicas: int | None = None
+    hfresh_search_probe: int | None = None
+    distance_metric: str | None = None
+    rescore_limit: int | None = None
     object_ttl_type: str = "create"
-    object_ttl_time: Optional[int] = None
-    object_ttl_filter_expired: Optional[bool] = None
-    object_ttl_property_name: Optional[str] = None
+    object_ttl_time: int | None = None
+    object_ttl_filter_expired: bool | None = None
+    object_ttl_property_name: str | None = None
 
 
 @dataclass
 class CreateTenantsDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
     tenant_suffix: str = "Tenant"
     number_tenants: int = 100
-    tenant_batch_size: Optional[int] = None
+    tenant_batch_size: int | None = None
     state: str = "active"
-    tenants: Optional[List[str]] = None
+    tenants: list[str] | None = None
 
 
 @dataclass
 class CreateBackupDefaults:
     backend: str = "s3"
     backup_id: str = "test-backup"
-    incremental_base_backup_id: Optional[str] = None
-    include: Optional[str] = None
-    exclude: Optional[str] = None
+    incremental_base_backup_id: str | None = None
+    include: str | None = None
+    exclude: str | None = None
     wait: bool = False
     cpu_for_backup: int = 40
 
@@ -112,16 +110,16 @@ class CancelBackupDefaults:
 
 @dataclass
 class DeleteCollectionDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
     all: bool = False
 
 
 @dataclass
 class DeleteTenantsDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
     tenant_suffix: str = "Tenant"
     number_tenants: int = 100
-    tenants: Optional[list] = None
+    tenants: list | None = None
 
 
 @dataclass
@@ -131,39 +129,39 @@ class DeleteRoleDefaults:
 
 @dataclass
 class GetCollectionDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
 
 
 @dataclass
 class GetTenantsDefaults:
-    collection: Optional[str] = None
-    tenant_id: Optional[str] = None
+    collection: str | None = None
+    tenant_id: str | None = None
     verbose: bool = False
 
 
 @dataclass
 class GetShardsDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
 
 
 @dataclass
 class GetRoleDefaults:
-    role_name: Optional[str] = None
-    user_name: Optional[str] = None
-    user_type: Optional[str] = "db"
+    role_name: str | None = None
+    user_name: str | None = None
+    user_type: str | None = "db"
 
 
 @dataclass
 class GetBackupDefaults:
     backend: str = "s3"
-    backup_id: Optional[str] = None
+    backup_id: str | None = None
     restore: bool = False
 
 
 @dataclass
 class GetUserDefaults:
-    role_name: Optional[str] = None
-    user_name: Optional[str] = None
+    role_name: str | None = None
+    user_name: str | None = None
 
 
 @dataclass
@@ -171,48 +169,48 @@ class RestoreBackupDefaults:
     backend: str = "s3"
     backup_id: str = "test-backup"
     wait: bool = False
-    include: Optional[str] = None
-    exclude: Optional[str] = None
+    include: str | None = None
+    exclude: str | None = None
     override_alias: bool = False
 
 
 @dataclass
 class UpdateCollectionDefaults:
-    collection: Optional[str] = None
-    async_enabled: Optional[bool] = None
-    replication_factor: Optional[int] = None
-    vector_index: Optional[str] = None
-    description: Optional[str] = None
+    collection: str | None = None
+    async_enabled: bool | None = None
+    replication_factor: int | None = None
+    vector_index: str | None = None
+    description: str | None = None
     training_limit: int = 10000
-    auto_tenant_creation: Optional[bool] = None
-    auto_tenant_activation: Optional[bool] = None
-    replication_deletion_strategy: Optional[str] = None
+    auto_tenant_creation: bool | None = None
+    auto_tenant_activation: bool | None = None
+    replication_deletion_strategy: str | None = None
     object_ttl_type: str = "create"
-    object_ttl_time: Optional[int] = None
-    object_ttl_filter_expired: Optional[bool] = None
-    object_ttl_property_name: Optional[str] = None
+    object_ttl_time: int | None = None
+    object_ttl_filter_expired: bool | None = None
+    object_ttl_property_name: str | None = None
 
 
 @dataclass
 class UpdateTenantsDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
     tenant_suffix: str = "Tenant"
     number_tenants: int = 100
     state: str = "active"
-    tenants: Optional[str] = None
+    tenants: str | None = None
 
 
 @dataclass
 class UpdateShardsDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
     status: str = "READY"
-    shards: Optional[str] = None
+    shards: str | None = None
     all: bool = False
 
 
 @dataclass
 class UpdateUserDefaults:
-    user_name: Optional[str] = None
+    user_name: str | None = None
     rotate_api_key: bool = False
     activate: bool = False
     deactivate: bool = False
@@ -220,13 +218,13 @@ class UpdateUserDefaults:
 
 @dataclass
 class GetNodesDefaults:
-    collection: Optional[str] = None
+    collection: str | None = None
 
 
 @dataclass
 class GetAliasDefaults:
-    alias_name: Optional[str] = None
-    collection: Optional[str] = None
+    alias_name: str | None = None
+    collection: str | None = None
     all: bool = False
 
 
@@ -235,8 +233,8 @@ class CreateExportCollectionDefaults:
     export_id: str = "test-export"
     backend: str = "filesystem"
     file_format: str = "parquet"
-    include: Optional[str] = None
-    exclude: Optional[str] = None
+    include: str | None = None
+    exclude: str | None = None
     wait: bool = False
 
 

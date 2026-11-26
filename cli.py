@@ -12,20 +12,21 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-from typing import Optional
-import click
 import sys
-from weaviate_cli.managers.config_manager import ConfigManager
+
+import click
+
+from weaviate_cli import __version__
+from weaviate_cli.commands.assign import assign
+from weaviate_cli.commands.cancel import cancel
 from weaviate_cli.commands.create import create
 from weaviate_cli.commands.delete import delete
 from weaviate_cli.commands.get import get
-from weaviate_cli.commands.update import update
 from weaviate_cli.commands.query import query
 from weaviate_cli.commands.restore import restore
-from weaviate_cli.commands.cancel import cancel
-from weaviate_cli.commands.assign import assign
 from weaviate_cli.commands.revoke import revoke
-from weaviate_cli import __version__
+from weaviate_cli.commands.update import update
+from weaviate_cli.managers.config_manager import ConfigManager
 
 
 def print_version(ctx, param, value):
@@ -58,7 +59,7 @@ def print_version(ctx, param, value):
     help="Prints the version of the CLI.",
 )
 @click.pass_context
-def main(ctx: click.Context, config_file: Optional[str], user: Optional[str]):
+def main(ctx: click.Context, config_file: str | None, user: str | None):
     """Weaviate CLI tool"""
     try:
         ctx.obj = {"config": ConfigManager(config_file, user)}

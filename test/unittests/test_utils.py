@@ -1,16 +1,18 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+from weaviate.rbac.models import Permissions, RoleScope
+
 from weaviate_cli.utils import (
+    ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS,
+    ASYNC_REPLICATION_CONFIG_HELP,
+    ASYNC_REPLICATION_CONFIG_KEYS,
     get_client_from_context,
     get_random_string,
-    parse_permission,
     parse_async_replication_config,
+    parse_permission,
     warn_removed_async_replication_keys,
-    ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS,
-    ASYNC_REPLICATION_CONFIG_KEYS,
-    ASYNC_REPLICATION_CONFIG_HELP,
 )
-from weaviate.rbac.models import Permissions, RoleScope
 
 
 def test_get_client_from_context(mock_click_context, mock_client):

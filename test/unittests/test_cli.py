@@ -1,8 +1,9 @@
-import json
+from unittest.mock import patch
+
 import pytest
 from click.testing import CliRunner
+
 from cli import main
-from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture

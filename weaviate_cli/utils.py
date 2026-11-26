@@ -2,15 +2,15 @@
 Utility functions.
 """
 
-from collections.abc import Sequence
 import json
-import click
-import string
 import random
+import string
+from collections.abc import Callable, Sequence
+
+import click
 import semver
 import weaviate
-from weaviate.rbac.models import Permissions, RoleScope, PermissionsCreateType
-from typing import Callable, Optional, Union, List
+from weaviate.rbac.models import Permissions, PermissionsCreateType, RoleScope
 
 
 def get_client_from_context(ctx: click.Context) -> weaviate.WeaviateClient:
@@ -98,8 +98,8 @@ ASYNC_REPLICATION_CONFIG_HELP = (
 
 
 def parse_async_replication_config(
-    config_tuples: Optional[tuple],
-) -> Optional[dict]:
+    config_tuples: tuple | None,
+) -> dict | None:
     """Parse async replication config key=value tuples into a dict.
 
     Args:
@@ -149,7 +149,7 @@ def parse_async_replication_config(
 
 
 def warn_removed_async_replication_keys(
-    client, async_replication_config: Optional[dict]
+    client, async_replication_config: dict | None
 ) -> None:
     """Warn when async replication keys the target server no longer supports are used.
 
@@ -313,14 +313,14 @@ def parse_permission(perm: str) -> PermissionsCreateType:
 
 
 def _create_permission(
-    action: Union[str, Sequence[str]],
+    action: str | Sequence[str],
     resource: str,
-    role: Union[str, Sequence[str]] = "*",
-    role_scope: Optional[str] = None,
-    user: Union[str, Sequence[str]] = "*",
-    collection: Union[str, Sequence[str]] = "*",
-    tenant: Union[str, Sequence[str]] = "*",
-    alias: Union[str, Sequence[str]] = "*",
+    role: str | Sequence[str] = "*",
+    role_scope: str | None = None,
+    user: str | Sequence[str] = "*",
+    collection: str | Sequence[str] = "*",
+    tenant: str | Sequence[str] = "*",
+    alias: str | Sequence[str] = "*",
     verbosity: str = "minimal",
 ) -> PermissionsCreateType:
     """Helper function to create individual RBAC permission objects."""
@@ -358,7 +358,7 @@ def _create_permission(
         }
         scope = None
         if role_scope:
-            if role_scope not in roles_scope_map.keys():
+            if role_scope not in roles_scope_map:
                 raise ValueError(
                     f"Invalid role scope: {role_scope}, expected one of: {', '.join(roles_scope_map.keys())}"
                 )
@@ -424,11 +424,9 @@ def older_than_version(client, minimum_version):
 
 
 def is_version_older_than(version, check_version):
-    if (
+    return (
         semver.Version.compare(
             semver.Version.parse(version), semver.Version.parse(check_version)
         )
         < 0
-    ):
-        return True
-    return False
+    )

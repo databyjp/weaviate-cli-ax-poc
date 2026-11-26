@@ -1,9 +1,9 @@
-import pytest
-from unittest.mock import Mock, patch
-from weaviate_cli.managers.node_manager import NodeManager
-from weaviate.cluster.types import Node, Shard
 from dataclasses import dataclass
-from typing import List, Optional
+from unittest.mock import Mock
+
+import pytest
+
+from weaviate_cli.managers.node_manager import NodeManager
 
 
 @dataclass
@@ -28,8 +28,8 @@ class Shard:
 class Node:
     git_hash: str
     name: str
-    shards: Optional[List[Shard]]
-    stats: Optional[Stats]
+    shards: list[Shard] | None
+    stats: Stats | None
     status: str
     version: str
 

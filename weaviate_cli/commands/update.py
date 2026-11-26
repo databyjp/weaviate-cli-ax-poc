@@ -1,31 +1,31 @@
-import sys
-import click
 import json
-from typing import Optional, Tuple, Union
+import sys
+
+import click
 
 from weaviate_cli.completion.complete import collection_name_complete
+from weaviate_cli.defaults import (
+    UpdateCollectionDefaults,
+    UpdateShardsDefaults,
+    UpdateTenantsDefaults,
+    UpdateUserDefaults,
+)
 from weaviate_cli.managers.alias_manager import AliasManager
+from weaviate_cli.managers.collection_manager import CollectionManager
+from weaviate_cli.managers.shard_manager import ShardManager
 from weaviate_cli.managers.tenant_manager import TenantManager
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.utils import (
+    ASYNC_REPLICATION_CONFIG_HELP,
     get_client_from_context,
     parse_async_replication_config,
-    ASYNC_REPLICATION_CONFIG_HELP,
 )
-from weaviate_cli.managers.collection_manager import CollectionManager
-from weaviate_cli.managers.shard_manager import ShardManager
-from weaviate.exceptions import WeaviateConnectionError
-from weaviate_cli.defaults import UpdateCollectionDefaults
-from weaviate_cli.defaults import UpdateTenantsDefaults
-from weaviate_cli.defaults import UpdateShardsDefaults
-from weaviate_cli.defaults import UpdateUserDefaults
 
 
 # Update Group
 @click.group()
 def update() -> None:
     """Update resources in Weaviate."""
-    pass
 
 
 @update.command("collection")
@@ -121,20 +121,20 @@ def update() -> None:
 def update_collection_cli(
     ctx: click.Context,
     collection: str,
-    async_enabled: Optional[bool],
-    replication_factor: Optional[int],
-    vector_index: Optional[str],
-    description: Optional[str],
+    async_enabled: bool | None,
+    replication_factor: int | None,
+    vector_index: str | None,
+    description: str | None,
     training_limit: int,
-    auto_tenant_creation: Optional[bool],
-    auto_tenant_activation: Optional[bool],
-    replication_deletion_strategy: Optional[str],
+    auto_tenant_creation: bool | None,
+    auto_tenant_activation: bool | None,
+    replication_deletion_strategy: str | None,
     json_output: bool,
     object_ttl_type: str,
-    object_ttl_time: Optional[int],
+    object_ttl_time: int | None,
     object_ttl_filter_expired: bool,
-    object_ttl_property_name: Optional[str],
-    async_replication_config: Tuple[str, ...],
+    object_ttl_property_name: str | None,
+    async_replication_config: tuple[str, ...],
 ) -> None:
     """Update a collection in Weaviate."""
 
@@ -268,8 +268,8 @@ def update_tenants_cli(
 def update_shards_cli(
     ctx: click.Context,
     status: str,
-    collection: Optional[str],
-    shards: Optional[str],
+    collection: str | None,
+    shards: str | None,
     all: bool,
     json_output: bool,
 ) -> None:

@@ -1,24 +1,26 @@
-import click
 import json
-from typing import Dict, List, Optional
+from typing import ClassVar
+
+import click
+import weaviate.classes.config as wvc
+from prettytable import PrettyTable
 from weaviate.client import WeaviateClient
 from weaviate.collections import Collection
 from weaviate.collections.classes.config import _CollectionConfigSimple
-from weaviate.collections.classes.tenants import TenantActivityStatus
 from weaviate.collections.classes.config_vector_index import VectorFilterStrategy
+from weaviate.collections.classes.tenants import TenantActivityStatus
+
 from weaviate_cli.defaults import (
     CreateCollectionDefaults,
-    UpdateCollectionDefaults,
     DeleteCollectionDefaults,
     GetCollectionDefaults,
+    UpdateCollectionDefaults,
 )
 from weaviate_cli.utils import (
-    print_json_or_text,
     older_than_version,
+    print_json_or_text,
     warn_removed_async_replication_keys,
 )
-import weaviate.classes.config as wvc
-from prettytable import PrettyTable
 
 
 class CollectionManager:
@@ -27,7 +29,7 @@ class CollectionManager:
 
     def __get_total_objects_with_multitenant(self, col_obj: Collection) -> int:
         acc = 0
-        for tenant_name, tenant in col_obj.tenants.get().items():
+        for tenant in col_obj.tenants.get().values():
             acc += (
                 len(col_obj.with_tenant(tenant))
                 if tenant.activity_status == TenantActivityStatus.ACTIVE
@@ -37,7 +39,7 @@ class CollectionManager:
 
     def get_collection(
         self,
-        collection: Optional[str] = GetCollectionDefaults.collection,
+        collection: str | None = GetCollectionDefaults.collection,
         json_output: bool = False,
     ) -> None:
 
@@ -67,13 +69,12 @@ class CollectionManager:
                 named_vectors = "False"
                 if schema.vector_config and not schema.vectorizer:
                     named_vectors = "True"
-                    vectorizer = schema.vector_config[
-                        list(schema.vector_config.keys())[0]
-                    ].vectorizer.vectorizer.value
+                    first_vector = next(iter(schema.vector_config.values()))
+                    vectorizer = first_vector.vectorizer.vectorizer.value
                     if not schema.vector_index_type:
-                        vector_index_type = schema.vector_config[
-                            list(schema.vector_config.keys())[0]
-                        ].vector_index_config.vector_index_type()
+                        vector_index_type = (
+                            first_vector.vector_index_config.vector_index_type()
+                        )
                     else:
                         vector_index_type = schema.vector_index_type
                 else:
@@ -151,7 +152,7 @@ class CollectionManager:
     def get_all_collections(self) -> dict[str, _CollectionConfigSimple]:
         return self.client.collections.list_all()
 
-    _DISTANCE_METRIC_MAP = {
+    _DISTANCE_METRIC_MAP: ClassVar[dict[str, wvc.VectorDistances]] = {
         "cosine": wvc.VectorDistances.COSINE,
         "dot": wvc.VectorDistances.DOT,
         "l2-squared": wvc.VectorDistances.L2_SQUARED,
@@ -160,8 +161,8 @@ class CollectionManager:
     }
 
     def _resolve_distance_metric(
-        self, distance_metric: Optional[str]
-    ) -> Optional[wvc.VectorDistances]:
+        self, distance_metric: str | None
+    ) -> wvc.VectorDistances | None:
         """Convert a distance metric string to its VectorDistances enum value."""
         if distance_metric is None:
             return None
@@ -174,11 +175,11 @@ class CollectionManager:
 
     def _build_hfresh_config(
         self,
-        max_posting_size_kb: Optional[int] = None,
-        distance_metric: Optional[wvc.VectorDistances] = None,
-        rescore_limit: Optional[int] = None,
-        replicas: Optional[int] = None,
-        search_probe: Optional[int] = None,
+        max_posting_size_kb: int | None = None,
+        distance_metric: wvc.VectorDistances | None = None,
+        rescore_limit: int | None = None,
+        replicas: int | None = None,
+        search_probe: int | None = None,
     ):
         """Build hfresh configuration with provided parameters."""
         kwargs = {}
@@ -200,44 +201,40 @@ class CollectionManager:
 
     def create_collection(
         self,
-        collection: Optional[str] = CreateCollectionDefaults.collection,
+        collection: str | None = CreateCollectionDefaults.collection,
         replication_factor: int = CreateCollectionDefaults.replication_factor,
         async_enabled: bool = CreateCollectionDefaults.async_enabled,
         vector_index: str = CreateCollectionDefaults.vector_index,
-        inverted_index: Optional[str] = CreateCollectionDefaults.inverted_index,
+        inverted_index: str | None = CreateCollectionDefaults.inverted_index,
         training_limit: int = CreateCollectionDefaults.training_limit,
         multitenant: bool = CreateCollectionDefaults.multitenant,
         auto_tenant_creation: bool = CreateCollectionDefaults.auto_tenant_creation,
         auto_tenant_activation: bool = CreateCollectionDefaults.auto_tenant_activation,
         shards: int = CreateCollectionDefaults.shards,
         vectorizer: str = CreateCollectionDefaults.vectorizer,
-        vectorizer_base_url: Optional[
-            str
-        ] = CreateCollectionDefaults.vectorizer_base_url,
-        replication_deletion_strategy: Optional[
-            str
-        ] = CreateCollectionDefaults.replication_deletion_strategy,
+        vectorizer_base_url: str | None = CreateCollectionDefaults.vectorizer_base_url,
+        replication_deletion_strategy: (
+            str | None
+        ) = CreateCollectionDefaults.replication_deletion_strategy,
         named_vector: bool = CreateCollectionDefaults.named_vector,
-        named_vector_name: Optional[str] = CreateCollectionDefaults.named_vector_name,
-        hfresh_max_posting_size_kb: Optional[
-            int
-        ] = CreateCollectionDefaults.hfresh_max_posting_size_kb,
-        hfresh_replicas: Optional[int] = CreateCollectionDefaults.hfresh_replicas,
-        hfresh_search_probe: Optional[
-            int
-        ] = CreateCollectionDefaults.hfresh_search_probe,
-        distance_metric: Optional[str] = CreateCollectionDefaults.distance_metric,
-        rescore_limit: Optional[int] = CreateCollectionDefaults.rescore_limit,
+        named_vector_name: str | None = CreateCollectionDefaults.named_vector_name,
+        hfresh_max_posting_size_kb: (
+            int | None
+        ) = CreateCollectionDefaults.hfresh_max_posting_size_kb,
+        hfresh_replicas: int | None = CreateCollectionDefaults.hfresh_replicas,
+        hfresh_search_probe: int | None = CreateCollectionDefaults.hfresh_search_probe,
+        distance_metric: str | None = CreateCollectionDefaults.distance_metric,
+        rescore_limit: int | None = CreateCollectionDefaults.rescore_limit,
         json_output: bool = False,
         object_ttl_type: str = CreateCollectionDefaults.object_ttl_type,
-        object_ttl_time: Optional[int] = CreateCollectionDefaults.object_ttl_time,
-        object_ttl_filter_expired: Optional[
-            bool
-        ] = CreateCollectionDefaults.object_ttl_filter_expired,
-        object_ttl_property_name: Optional[
-            str
-        ] = CreateCollectionDefaults.object_ttl_property_name,
-        async_replication_config: Optional[Dict[str, int]] = None,
+        object_ttl_time: int | None = CreateCollectionDefaults.object_ttl_time,
+        object_ttl_filter_expired: (
+            bool | None
+        ) = CreateCollectionDefaults.object_ttl_filter_expired,
+        object_ttl_property_name: (
+            str | None
+        ) = CreateCollectionDefaults.object_ttl_property_name,
+        async_replication_config: dict[str, int] | None = None,
     ) -> None:
 
         if not collection:
@@ -286,7 +283,7 @@ class CollectionManager:
 
         distance_metric_enum = self._resolve_distance_metric(distance_metric)
 
-        vector_index_map: Dict[str, wvc.VectorIndexConfig] = {
+        vector_index_map: dict[str, wvc.VectorIndexConfig] = {
             "hnsw": wvc.Configure.VectorIndex.hnsw(
                 distance_metric=distance_metric_enum
             ),
@@ -505,7 +502,7 @@ class CollectionManager:
                     filter_expired_objects=object_ttl_filter_expired,
                 )
 
-        vectorizer_map: Dict[str, wvc.VectorizerConfig] = {}
+        vectorizer_map: dict[str, wvc.VectorizerConfig] = {}
         if named_vector:
             # Common arguments for named vectors
             named_vector_args = {
@@ -531,7 +528,7 @@ class CollectionManager:
             ) in vectorizers_config.items():
                 vectorizer_map[name] = default_func(**params)
 
-        inverted_index_map: Dict[str, wvc.InvertedIndexConfig] = {
+        inverted_index_map: dict[str, wvc.InvertedIndexConfig] = {
             "timestamp": wvc.Configure.inverted_index(index_timestamps=True),
             "null": wvc.Configure.inverted_index(index_null_state=True),
             "length": wvc.Configure.inverted_index(index_property_length=True),
@@ -544,7 +541,7 @@ class CollectionManager:
         }
 
         try:
-            if vectorizer not in vectorizer_map.keys():
+            if vectorizer not in vectorizer_map:
                 raise Exception(
                     f"Error: Vectorizer '{vectorizer}' is not supported. Please use one of the following: {list(vectorizer_map.keys())}"
                 )
@@ -610,31 +607,31 @@ class CollectionManager:
 
     def update_collection(
         self,
-        collection: Optional[str] = UpdateCollectionDefaults.collection,
-        description: Optional[str] = UpdateCollectionDefaults.description,
-        vector_index: Optional[str] = UpdateCollectionDefaults.vector_index,
+        collection: str | None = UpdateCollectionDefaults.collection,
+        description: str | None = UpdateCollectionDefaults.description,
+        vector_index: str | None = UpdateCollectionDefaults.vector_index,
         training_limit: int = UpdateCollectionDefaults.training_limit,
-        async_enabled: Optional[bool] = UpdateCollectionDefaults.async_enabled,
-        replication_factor: Optional[int] = UpdateCollectionDefaults.replication_factor,
-        auto_tenant_creation: Optional[
-            bool
-        ] = UpdateCollectionDefaults.auto_tenant_creation,
-        auto_tenant_activation: Optional[
-            bool
-        ] = UpdateCollectionDefaults.auto_tenant_activation,
-        replication_deletion_strategy: Optional[
-            str
-        ] = UpdateCollectionDefaults.replication_deletion_strategy,
+        async_enabled: bool | None = UpdateCollectionDefaults.async_enabled,
+        replication_factor: int | None = UpdateCollectionDefaults.replication_factor,
+        auto_tenant_creation: (
+            bool | None
+        ) = UpdateCollectionDefaults.auto_tenant_creation,
+        auto_tenant_activation: (
+            bool | None
+        ) = UpdateCollectionDefaults.auto_tenant_activation,
+        replication_deletion_strategy: (
+            str | None
+        ) = UpdateCollectionDefaults.replication_deletion_strategy,
         json_output: bool = False,
         object_ttl_type: str = UpdateCollectionDefaults.object_ttl_type,
-        object_ttl_time: Optional[int] = UpdateCollectionDefaults.object_ttl_time,
-        object_ttl_filter_expired: Optional[
-            bool
-        ] = UpdateCollectionDefaults.object_ttl_filter_expired,
-        object_ttl_property_name: Optional[
-            str
-        ] = UpdateCollectionDefaults.object_ttl_property_name,
-        async_replication_config: Optional[Dict[str, int]] = None,
+        object_ttl_time: int | None = UpdateCollectionDefaults.object_ttl_time,
+        object_ttl_filter_expired: (
+            bool | None
+        ) = UpdateCollectionDefaults.object_ttl_filter_expired,
+        object_ttl_property_name: (
+            str | None
+        ) = UpdateCollectionDefaults.object_ttl_property_name,
+        async_replication_config: dict[str, int] | None = None,
     ) -> None:
 
         if not collection:
@@ -676,7 +673,7 @@ class CollectionManager:
                 f"Error: Collection '{collection}' does not exist in Weaviate. Create first using ./create_collection.py"
             )
 
-        vector_index_map: Dict[str, wvc.VectorIndexConfig] = {
+        vector_index_map: dict[str, wvc.VectorIndexConfig] = {
             "hnsw": wvc.Reconfigure.VectorIndex.hnsw(),
             "flat": wvc.Reconfigure.VectorIndex.flat(),
             "hnsw_pq": wvc.Reconfigure.VectorIndex.hnsw(
@@ -795,7 +792,7 @@ class CollectionManager:
 
     def delete_collection(
         self,
-        collection: Optional[str] = DeleteCollectionDefaults.collection,
+        collection: str | None = DeleteCollectionDefaults.collection,
         all: bool = DeleteCollectionDefaults.all,
         json_output: bool = False,
     ) -> None:
@@ -804,11 +801,11 @@ class CollectionManager:
                 "Error: Collection name is required unless --all is specified."
             )
         if all:
-            collections: List[str] = self.client.collections.list_all()
-            for collection in collections:
+            collections: list[str] = self.client.collections.list_all()
+            for col_name in collections:
                 if not json_output:
-                    click.echo(f"Deleting collection '{collection}'")
-                self.client.collections.delete(collection)
+                    click.echo(f"Deleting collection '{col_name}'")
+                self.client.collections.delete(col_name)
             if json_output:
                 click.echo(
                     json.dumps(

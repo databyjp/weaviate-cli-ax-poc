@@ -1,6 +1,8 @@
 import json
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from weaviate_cli.managers.role_manager import RoleManager
 
 

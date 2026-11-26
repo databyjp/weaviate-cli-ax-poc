@@ -1,9 +1,10 @@
 import pytest
 import weaviate
+import weaviate.classes.config as wvc
+
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.config_manager import ConfigManager
 from weaviate_cli.managers.shard_manager import ShardManager
-import weaviate.classes.config as wvc
 
 
 @pytest.fixture
@@ -130,7 +131,7 @@ def test_error_handling(collection_manager: CollectionManager):
             vectorizer="transformers",
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="already exists"):
             collection_manager.create_collection(
                 collection="TestCol",
                 replication_factor=1,
@@ -142,11 +143,11 @@ def test_error_handling(collection_manager: CollectionManager):
         # Test deleting non-existent collection
         collection_manager.delete_collection(collection="TestCol")
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="doesn't exist"):
         collection_manager.delete_collection(collection="NonExistentCol")
 
     # Test updating non-existent collection
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="does not exist"):
         collection_manager.update_collection(
             collection="NonExistentCol",
             description="Updated description",

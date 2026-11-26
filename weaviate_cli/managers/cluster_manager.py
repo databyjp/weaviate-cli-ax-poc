@@ -1,11 +1,10 @@
 import json
-from typing import Callable, Optional
-
-from prettytable import PrettyTable
+from collections.abc import Callable
 
 import weaviate.classes.replication as wvcr
 import weaviate.outputs.cluster as wvoc
 import weaviate.outputs.replication as wvor
+from prettytable import PrettyTable
 from weaviate.client import WeaviateClient
 
 
@@ -244,7 +243,7 @@ class ClusterManager:
                     return status.errors[0]
         return ""
 
-    def query_sharding_state(self, collection: str, shard: Optional[str]):
+    def query_sharding_state(self, collection: str, shard: str | None):
         """Query the sharding state of a collection or shard."""
         try:
             return self.client.cluster.query_sharding_state(

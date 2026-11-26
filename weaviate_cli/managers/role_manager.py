@@ -1,14 +1,15 @@
-from typing import Optional, List, Dict
 import json
+
 import click
-from weaviate_cli.utils import older_than_version, parse_permission
 from weaviate import WeaviateClient
 from weaviate.rbac.models import Role, RoleBase
+
 from weaviate_cli.defaults import (
     CreateRoleDefaults,
     DeleteRoleDefaults,
     GetRoleDefaults,
 )
+from weaviate_cli.utils import older_than_version, parse_permission
 
 
 class RoleManager:
@@ -46,7 +47,7 @@ class RoleManager:
         except Exception as e:
             raise Exception(f"Error creating role '{role_name}': {e}")
 
-    def get_role(self, role_name: str) -> Optional[Role]:
+    def get_role(self, role_name: str) -> Role | None:
         try:
             return self.client.roles.get(role_name=role_name)
         except Exception as e:
@@ -54,7 +55,7 @@ class RoleManager:
 
     def get_roles_from_user(
         self, user_name: str, user_type: str = GetRoleDefaults.user_type
-    ) -> Dict[str, RoleBase]:
+    ) -> dict[str, RoleBase]:
         try:
             if older_than_version(self.client, "1.30.0"):
                 return self.client.users.get_assigned_roles(user_id=user_name)
@@ -94,13 +95,13 @@ class RoleManager:
         except Exception as e:
             raise Exception(f"Error deleting role '{role_name}': {e}")
 
-    def get_all_roles(self) -> Dict[str, Role]:
+    def get_all_roles(self) -> dict[str, Role]:
         try:
             return self.client.roles.list_all()
         except Exception as e:
             raise Exception(f"Error getting all roles: {e}")
 
-    def role_of_current_user(self) -> Dict[str, Role]:
+    def role_of_current_user(self) -> dict[str, Role]:
         """Get the role of the current user."""
         try:
             return self.client.users.get_my_user().roles
@@ -255,7 +256,7 @@ class RoleManager:
             ]
         return role_data
 
-    def print_role(self, role: Optional[Role] = None) -> None:
+    def print_role(self, role: Role | None = None) -> None:
         """Print a role and its permissions in a human readable format."""
         if not role:
             raise ValueError("The role does not exist.")

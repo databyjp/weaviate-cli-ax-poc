@@ -1,11 +1,9 @@
 import pytest
 import weaviate
-import click
-from click.testing import CliRunner
+
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.managers.config_manager import ConfigManager
 from weaviate_cli.managers.user_manager import UserManager
-import weaviate.classes.config as wvc
 
 
 @pytest.fixture

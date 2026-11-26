@@ -1,17 +1,10 @@
 import json
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 from weaviate.collections.classes.tenants import TenantActivityStatus
 
 from weaviate_cli.managers.tenant_manager import TenantManager
-from weaviate_cli.defaults import (
-    CreateTenantsDefaults,
-    DeleteTenantsDefaults,
-    GetTenantsDefaults,
-    UpdateTenantsDefaults,
-)
-
 
 # ---------------------------------------------------------------------------
 # Constants

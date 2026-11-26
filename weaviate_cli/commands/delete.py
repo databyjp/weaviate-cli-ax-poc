@@ -1,30 +1,28 @@
 import json
 import sys
-import click
 
-from typing import Optional
+import click
 from weaviate import WeaviateClient
 
 from weaviate_cli.completion.complete import collection_name_complete
-from weaviate_cli.managers.alias_manager import AliasManager
-from weaviate_cli.managers.tenant_manager import TenantManager
-from weaviate_cli.utils import get_client_from_context
-from weaviate_cli.managers.collection_manager import CollectionManager
-from weaviate_cli.managers.cluster_manager import ClusterManager
-from weaviate_cli.managers.role_manager import RoleManager
-from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.defaults import (
     DeleteCollectionDefaults,
-    DeleteTenantsDefaults,
     DeleteRoleDefaults,
+    DeleteTenantsDefaults,
 )
+from weaviate_cli.managers.alias_manager import AliasManager
+from weaviate_cli.managers.cluster_manager import ClusterManager
+from weaviate_cli.managers.collection_manager import CollectionManager
+from weaviate_cli.managers.role_manager import RoleManager
+from weaviate_cli.managers.tenant_manager import TenantManager
+from weaviate_cli.managers.user_manager import UserManager
+from weaviate_cli.utils import get_client_from_context
 
 
 # Delete Group
 @click.group()
 def delete() -> None:
     """Delete resources in Weaviate."""
-    pass
 
 
 @delete.command("collection")
@@ -40,7 +38,7 @@ def delete() -> None:
 )
 @click.pass_context
 def delete_collection_cli(
-    ctx: click.Context, collection: Optional[str], all: bool, json_output: bool
+    ctx: click.Context, collection: str | None, all: bool, json_output: bool
 ) -> None:
     """Delete a collection in Weaviate."""
 
@@ -226,7 +224,7 @@ def delete_alias_cli(ctx: click.Context, alias_name: str, json_output: bool) -> 
 @click.pass_context
 def delete_replication_cli(ctx: click.Context, op_id: str, json_output: bool) -> None:
     """Delete a replication operation in Weaviate."""
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         manager = ClusterManager(client)
@@ -264,7 +262,7 @@ def delete_replication_cli(ctx: click.Context, op_id: str, json_output: bool) ->
 @click.pass_context
 def delete_all_replications_cli(ctx: click.Context, json_output: bool) -> None:
     """Delete all replication operations in Weaviate."""
-    client: Optional[WeaviateClient] = None
+    client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         manager = ClusterManager(client)

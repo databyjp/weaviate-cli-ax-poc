@@ -1,8 +1,10 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-from weaviate.exceptions import WeaviateConnectionError
-from weaviate_cli.managers.collection_manager import CollectionManager
 import weaviate.classes.config as wvc
+from weaviate.exceptions import WeaviateConnectionError
+
+from weaviate_cli.managers.collection_manager import CollectionManager
 
 
 @pytest.fixture
@@ -161,7 +163,7 @@ def test_delete_nonexistent_collection(mock_client):
     manager = CollectionManager(mock_client)
     mock_client.collections.exists.return_value = False
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(Exception, match="doesn't exist"):
         manager.delete_collection(collection="TestCollection", all=False)
 
 

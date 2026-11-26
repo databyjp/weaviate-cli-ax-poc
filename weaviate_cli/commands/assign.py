@@ -1,17 +1,17 @@
-import click
 import sys
 
+import click
+
 from weaviate_cli.completion.complete import role_name_complete
-from weaviate_cli.managers.user_manager import UserManager
-from weaviate_cli.managers.role_manager import RoleManager
-from weaviate_cli.utils import get_client_from_context
 from weaviate_cli.defaults import PERMISSION_HELP_STRING
+from weaviate_cli.managers.role_manager import RoleManager
+from weaviate_cli.managers.user_manager import UserManager
+from weaviate_cli.utils import get_client_from_context
 
 
 @click.group()
 def assign() -> None:
     """Assign resources to other resources in Weaviate."""
-    pass
 
 
 @assign.command("role")

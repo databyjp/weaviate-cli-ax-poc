@@ -1,10 +1,10 @@
 import json
 
 import click
-from typing import Dict, List, Optional
 from prettytable import PrettyTable
 from weaviate.client import WeaviateClient
-from weaviate_cli.types.models import NodeInfo, ShardInfo, CollectionInfo
+
+from weaviate_cli.types.models import CollectionInfo, NodeInfo, ShardInfo
 
 
 class NodeManager:
@@ -16,7 +16,7 @@ class NodeManager:
         minimal: bool = False,
         shards: bool = False,
         collections: bool = False,
-        collection: Optional[str] = None,
+        collection: str | None = None,
         json_output: bool = False,
     ) -> None:
         if minimal:
@@ -121,7 +121,7 @@ class NodeManager:
                 else:
                     self.__print_nodes_info(node_objects)
 
-    def get_nodes_objects(self, nodes=None) -> List[NodeInfo]:
+    def get_nodes_objects(self, nodes=None) -> list[NodeInfo]:
         if nodes is None:
             nodes = self.__get_nodes_verbose()
 
@@ -143,11 +143,11 @@ class NodeManager:
             )
         return node_infos
 
-    def get_shards_objects(self, nodes=None) -> List[ShardInfo]:
+    def get_shards_objects(self, nodes=None) -> list[ShardInfo]:
         if nodes is None:
             nodes = self.__get_nodes_verbose()
 
-        shard_dict: Dict[str, ShardInfo] = {}
+        shard_dict: dict[str, ShardInfo] = {}
 
         for node in nodes:
             if not node.shards:
@@ -168,11 +168,11 @@ class NodeManager:
 
         return list(shard_dict.values())
 
-    def get_collections_objects(self, nodes=None) -> List[CollectionInfo]:
+    def get_collections_objects(self, nodes=None) -> list[CollectionInfo]:
         if nodes is None:
             nodes = self.__get_nodes_verbose()
 
-        collection_dict: Dict[str, CollectionInfo] = {}
+        collection_dict: dict[str, CollectionInfo] = {}
 
         for node in nodes:
             if not node.shards:
@@ -196,12 +196,12 @@ class NodeManager:
 
     def get_collection_shards(
         self, collection_name: str, nodes=None
-    ) -> List[ShardInfo]:
+    ) -> list[ShardInfo]:
         """Get shard information for a specific collection."""
         if nodes is None:
             nodes = self.__get_nodes_verbose()
 
-        shard_dict: Dict[str, ShardInfo] = {}
+        shard_dict: dict[str, ShardInfo] = {}
 
         for node in nodes:
             if not node.shards:
@@ -223,7 +223,7 @@ class NodeManager:
 
         return list(shard_dict.values())
 
-    def __print_collection_shards(self, collection_name: str, shards: List[ShardInfo]):
+    def __print_collection_shards(self, collection_name: str, shards: list[ShardInfo]):
         """Print shard information for a specific collection."""
         if not shards:
             print(f"No shards found for collection '{collection_name}'")
@@ -250,7 +250,7 @@ class NodeManager:
         print(f"\nCollection: {collection_name} (Replication Factor: {rf})")
         print(table)
 
-    def __get_nodes_verbose(self, collection: Optional[str] = None):
+    def __get_nodes_verbose(self, collection: str | None = None):
         return self.client.cluster.nodes(output="verbose", collection=collection)
 
     def __get_nodes_minimal(self):
@@ -265,7 +265,7 @@ class NodeManager:
 
         print(table)
 
-    def __print_nodes_info(self, nodes: List[NodeInfo]):
+    def __print_nodes_info(self, nodes: list[NodeInfo]):
         table = PrettyTable()
         table.field_names = [
             "Node Name",
@@ -288,7 +288,7 @@ class NodeManager:
 
         print(table)
 
-    def __print_shards_info(self, shards: List[ShardInfo]):
+    def __print_shards_info(self, shards: list[ShardInfo]):
         table = PrettyTable()
         table.field_names = [
             "Shard Name",
@@ -314,7 +314,7 @@ class NodeManager:
 
         print(table)
 
-    def __print_collections_info(self, collections: List[CollectionInfo]):
+    def __print_collections_info(self, collections: list[CollectionInfo]):
         table = PrettyTable()
         table.field_names = [
             "Col. Name",

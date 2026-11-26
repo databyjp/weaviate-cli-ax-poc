@@ -1,15 +1,15 @@
-from typing import Optional, List
 import json
+
 import click
 import semver
-
 from weaviate import WeaviateClient
-from weaviate.collections.classes.tenants import TenantActivityStatus, Tenant
+from weaviate.collections.classes.tenants import Tenant, TenantActivityStatus
+
 from weaviate_cli.defaults import (
     CreateTenantsDefaults,
-    UpdateTenantsDefaults,
     DeleteTenantsDefaults,
     GetTenantsDefaults,
+    UpdateTenantsDefaults,
 )
 
 
@@ -22,9 +22,9 @@ class TenantManager:
         collection: str = CreateTenantsDefaults.collection,
         tenant_suffix: str = CreateTenantsDefaults.tenant_suffix,
         number_tenants: int = CreateTenantsDefaults.number_tenants,
-        tenant_batch_size: Optional[int] = CreateTenantsDefaults.tenant_batch_size,
+        tenant_batch_size: int | None = CreateTenantsDefaults.tenant_batch_size,
         state: str = CreateTenantsDefaults.state,
-        tenants_list: Optional[List[str]] = None,
+        tenants_list: list[str] | None = None,
         json_output: bool = False,
     ) -> None:
         """
@@ -140,8 +140,8 @@ class TenantManager:
         existing_tenants: dict,
         tenant_suffix: str,
         number_tenants: int,
-        tenants_list: Optional[List[str]],
-    ) -> List[str]:
+        tenants_list: list[str] | None,
+    ) -> list[str]:
         """
         Determine which tenant names to create.
 
@@ -157,7 +157,7 @@ class TenantManager:
         # Only look at existing tenants matching this suffix (ignore others)
         highest_index = -1
 
-        for tenant_name in existing_tenants.keys():
+        for tenant_name in existing_tenants:
             if tenant_name.startswith(f"{tenant_suffix}-"):
                 try:
                     index = int(tenant_name[len(f"{tenant_suffix}-") :])
@@ -176,7 +176,7 @@ class TenantManager:
         self,
         collection,
         version: semver.Version,
-        new_tenant_names: List[str],
+        new_tenant_names: list[str],
         expected_status: TenantActivityStatus,
     ) -> None:
         """Verify all requested tenants were created with correct status."""
@@ -206,7 +206,7 @@ class TenantManager:
         collection: str = DeleteTenantsDefaults.collection,
         tenant_suffix: str = DeleteTenantsDefaults.tenant_suffix,
         number_tenants: int = DeleteTenantsDefaults.number_tenants,
-        tenants_list: Optional[list] = DeleteTenantsDefaults.tenants,
+        tenants_list: list | None = DeleteTenantsDefaults.tenants,
         json_output: bool = False,
     ) -> None:
         """
@@ -222,7 +222,6 @@ class TenantManager:
                        no tenants are present, or if there is a failure in deleting tenants.
         """
 
-        version = semver.Version.parse(self.client.get_meta()["version"])
         if not self.client.collections.exists(collection):
 
             raise Exception(
@@ -395,7 +394,7 @@ class TenantManager:
         tenant_suffix: str = UpdateTenantsDefaults.tenant_suffix,
         number_tenants: int = UpdateTenantsDefaults.number_tenants,
         state: str = UpdateTenantsDefaults.state,
-        tenants: Optional[str] = UpdateTenantsDefaults.tenants,
+        tenants: str | None = UpdateTenantsDefaults.tenants,
         json_output: bool = False,
     ) -> None:
         """
@@ -490,12 +489,10 @@ class TenantManager:
             tenants_list = {
                 name: tenant
                 for name, tenant in collection.tenants.get().items()
-                if name in existing_tenants.keys()
+                if name in existing_tenants
             }
         else:
-            tenants_list = collection.tenants.get_by_names(
-                [name for name in existing_tenants.keys()]
-            )
+            tenants_list = collection.tenants.get_by_names(list(existing_tenants))
         if tenants is None:
             assert (
                 len(tenants_list) == number_tenants

@@ -1,11 +1,12 @@
 import json
-from typing import Optional
+
+import click
 from weaviate import WeaviateClient
+
 from weaviate_cli.defaults import (
     GetShardsDefaults,
     UpdateShardsDefaults,
 )
-import click
 
 
 class ShardManager:
@@ -14,7 +15,7 @@ class ShardManager:
 
     def get_shards(
         self,
-        collection: Optional[str] = GetShardsDefaults.collection,
+        collection: str | None = GetShardsDefaults.collection,
         json_output: bool = False,
     ) -> None:
         """
@@ -115,8 +116,8 @@ class ShardManager:
     def update_shards(
         self,
         status: str = UpdateShardsDefaults.status,
-        collection: Optional[str] = UpdateShardsDefaults.collection,
-        shards: Optional[str] = UpdateShardsDefaults.shards,
+        collection: str | None = UpdateShardsDefaults.collection,
+        shards: str | None = UpdateShardsDefaults.shards,
         all: bool = UpdateShardsDefaults.all,
         json_output: bool = False,
     ):
