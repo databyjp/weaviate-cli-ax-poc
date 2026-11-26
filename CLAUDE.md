@@ -43,7 +43,7 @@ make test           # Run unit tests
 
 - **Unit tests**: `test/unittests/` -- CliRunner for CLI, MagicMock for managers
 - **Integration tests**: `test/integration/` -- requires running Weaviate cluster
-- **CI**: lint -> unit tests (Python 3.9-3.13) -> integration tests (latest Weaviate)
+- **CI**: Ruff, Pyright, and package checks -> unit tests (Python 3.10-3.13) -> integration tests (latest Weaviate)
 
 ## Agent Skills
 

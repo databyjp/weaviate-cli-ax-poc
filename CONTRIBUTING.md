@@ -37,7 +37,7 @@ With the virtual environment active, run:
 - `make lint` to check lint rules and formatting without changing files.
 - `make typecheck` to check the CLI and tests with Pyright. This includes integration tests without starting a cluster. To check one file, run `pyright test/integration/test_auth_integration.py`.
 
-CI still checks Black formatting; the local Ruff and Pyright checks do not replace that CI check.
+CI runs `make lint` and `make typecheck` before the test jobs on pull requests and pushes to `main`.
 
 ## Tagging Your Commit
 Please tag your commit(s) with the appropriate GH issue that your change refers to, e.g. `gh-9001 reduce memory allocations of ACME widget`. Please also include something in your PR description to indicate which issue it will close, e.g. `fixes #9001` or `closes #9001`.

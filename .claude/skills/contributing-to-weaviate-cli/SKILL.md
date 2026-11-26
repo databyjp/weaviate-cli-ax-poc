@@ -229,7 +229,7 @@ See [references/testing.md](references/testing.md) for full patterns.
 ## CI Pipeline
 
 ```
-lint-and-format (Black + build check)
+lint-and-format (make lint + make typecheck + build check)
   -> unit-tests (Python 3.9-3.13, matrix)
     -> integration-tests (latest Weaviate, weaviate-local-k8s, Python 3.9-3.13)
     -> integration-auth-tests (RBAC-enabled cluster, Python 3.9-3.13)

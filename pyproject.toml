@@ -23,14 +23,3 @@ select = ["E4", "E7", "E9", "F", "I"]
 include = ["cli.py", "weaviate_cli", "test"]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
-
-# Retain Black's configuration while CI still runs it.
-[tool.black]
-line-length = 88
-target-version = ['py311']
-include = '\.pyi?$'
-extend-exclude = '''
-# A regex preceded with ^/ will apply only to files and directories
-# in the root of the project.
-^/docs
-'''

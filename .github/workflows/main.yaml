@@ -16,8 +16,10 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
-      - name: "Black"
-        run: black --check cli.py weaviate_cli test
+      - name: Check lint and formatting with Ruff
+        run: make lint
+      - name: Check types with Pyright
+        run: make typecheck
       - name: "Check release for pypi"
         run: |
           python -m build
