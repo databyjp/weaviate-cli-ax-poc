@@ -21,6 +21,7 @@ To contribute to Weaviate CLI you should have:
 3. Create a virtual environment:
     ```bash
     python -m venv .venv
+    source .venv/bin/activate
     ```
 4. Install development dependencies using Makefile:
     ```bash
@@ -28,19 +29,15 @@ To contribute to Weaviate CLI you should have:
     ```
 
 ### Code Style
-- We use Black for code formatting
-- Install development dependencies and pre-commit hooks (if not already installed):
-  ```bash
-  make install-dev
-  ```
-- Before committing, ensure code is formatted:
-  ```bash
-  make format
-  ```
-- CI will check formatting using:
-  ```bash
-  make lint
-  ```
+`make install-dev` installs pre-commit hooks that run Ruff's safe lint fixes and formatter on staged Python files. If a hook changes a file, review and stage the change before retrying the commit.
+
+With the virtual environment active, run:
+
+- `make format` to format the CLI and tests with Ruff.
+- `make lint` to check lint rules and formatting without changing files.
+- `make typecheck` to check the CLI and tests with Pyright. This includes integration tests without starting a cluster. To check one file, run `pyright test/integration/test_auth_integration.py`.
+
+CI still checks Black formatting; the local Ruff and Pyright checks do not replace that CI check.
 
 ## Tagging Your Commit
 Please tag your commit(s) with the appropriate GH issue that your change refers to, e.g. `gh-9001 reduce memory allocations of ACME widget`. Please also include something in your PR description to indicate which issue it will close, e.g. `fixes #9001` or `closes #9001`.

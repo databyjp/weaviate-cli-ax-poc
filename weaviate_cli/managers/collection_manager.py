@@ -42,10 +42,8 @@ class CollectionManager:
         collection: str | None = GetCollectionDefaults.collection,
         json_output: bool = False,
     ) -> None:
-
         if collection is not None:
             if not self.client.collections.exists(collection):
-
                 raise Exception(f"Collection '{collection}' does not exist")
             col_obj: Collection = self.client.collections.get(collection)
             # Pretty print the dict structure
@@ -236,7 +234,6 @@ class CollectionManager:
         ) = CreateCollectionDefaults.object_ttl_property_name,
         async_replication_config: dict[str, int] | None = None,
     ) -> None:
-
         if not collection:
             raise Exception("Error: Collection name is required.")
         if (
@@ -256,7 +253,6 @@ class CollectionManager:
                 "object_ttl_property_name is required when object_ttl_type is 'property'."
             )
         if self.client.collections.exists(collection):
-
             raise Exception(
                 f"Error: Collection '{collection}' already exists in Weaviate. Delete using <delete collection> command."
             )
@@ -587,7 +583,6 @@ class CollectionManager:
                 properties=None,
             )
         except Exception as e:
-
             raise Exception(f"Error creating Collection '{collection}': {e}")
 
         assert self.client.collections.exists(collection)
@@ -633,7 +628,6 @@ class CollectionManager:
         ) = UpdateCollectionDefaults.object_ttl_property_name,
         async_replication_config: dict[str, int] | None = None,
     ) -> None:
-
         if not collection:
             raise Exception("Error: Collection name is required.")
         if (
@@ -668,7 +662,6 @@ class CollectionManager:
         warn_removed_async_replication_keys(self.client, async_replication_config)
 
         if not self.client.collections.exists(collection):
-
             raise Exception(
                 f"Error: Collection '{collection}' does not exist in Weaviate. Create first using ./create_collection.py"
             )
@@ -823,7 +816,6 @@ class CollectionManager:
                 try:
                     self.client.collections.delete(collection)
                 except Exception as e:
-
                     raise Exception(
                         f"Failed to delete collection '{collection}' in Weaviate.: {e}"
                     )

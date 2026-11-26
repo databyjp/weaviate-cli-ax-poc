@@ -30,7 +30,6 @@ class BackupManager:
             str | None
         ) = CreateBackupDefaults.incremental_base_backup_id,
     ) -> None:
-
         version = semver.Version.parse(self.client.get_meta()["version"])
         if include:
             for collection in include.split(","):
@@ -89,7 +88,6 @@ class BackupManager:
         override_alias: bool = RestoreBackupDefaults.override_alias,
         json_output: bool = False,
     ) -> None:
-
         result = self.client.backup.restore(
             backup_id=backup_id,
             backend=backend,
@@ -100,7 +98,6 @@ class BackupManager:
         )
 
         if wait and result and result.status.value != "SUCCESS":
-
             raise Exception(
                 f"Backup '{backup_id}' failed with status '{result.status.value}'"
             )
@@ -125,7 +122,6 @@ class BackupManager:
         restore: bool = GetBackupDefaults.restore,
         json_output: bool = False,
     ) -> None:
-
         if restore:
             backup = self.client.backup.get_restore_status(
                 backup_id=backup_id,

@@ -26,7 +26,21 @@ from weaviate_cli.commands.update import (
     update_shards_cli,
     update_tenants_cli,
 )
-from weaviate_cli.defaults import *
+from weaviate_cli.defaults import (
+    CreateBackupDefaults,
+    CreateCollectionDefaults,
+    CreateTenantsDefaults,
+    DeleteCollectionDefaults,
+    DeleteTenantsDefaults,
+    GetBackupDefaults,
+    GetCollectionDefaults,
+    GetShardsDefaults,
+    GetTenantsDefaults,
+    RestoreBackupDefaults,
+    UpdateCollectionDefaults,
+    UpdateShardsDefaults,
+    UpdateTenantsDefaults,
+)
 
 
 @pytest.fixture

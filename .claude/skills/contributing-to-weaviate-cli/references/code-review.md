@@ -6,7 +6,7 @@ PR checklist, common pitfalls, and conventions for weaviate-cli.
 
 ### Required for All PRs
 
-- [ ] `make lint` passes (Black formatting)
+- [ ] `make lint` passes (Ruff lint and formatting)
 - [ ] `make test` passes (unit tests)
 - [ ] No hardcoded paths or credentials
 - [ ] No debug/print statements left in code
@@ -115,8 +115,7 @@ Apply the same pattern inside manager methods when splitting a `tenants` string 
 
 ### Formatting
 
-- **Black** formatter with default settings
-- No custom line length -- Black's default (88 chars)
+- **Ruff** formatter, 88-character line length
 - Run `make format` before committing
 
 ### Naming
@@ -138,4 +137,4 @@ Apply the same pattern inside manager methods when splitting a `tenants` string 
 - Branch naming: `<username>/<feature-description>`
 - Main branch: `master`
 - PRs require CI passing
-- Pre-commit hooks: `make install-dev` sets up Black
+- Pre-commit hooks: `make install-dev` installs Ruff lint and format hooks

@@ -27,9 +27,8 @@ class ConfigManager:
         """Initialize config manager with optional config file path"""
         self.user = user
         if config_file:
-            assert os.path.isfile(
-                config_file
-            ), f"Config file '{config_file}' does not exist!"
+            file_exists = os.path.isfile(config_file)
+            assert file_exists, f"Config file '{config_file}' does not exist!"
             self.config_path: str | Path = config_file
             with open(self.config_path, "r", encoding="utf-8") as config_data:
                 try:

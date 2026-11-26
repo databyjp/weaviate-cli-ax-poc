@@ -16,8 +16,9 @@ make test           # Run unit tests
 
 | Command | What it does |
 |---------|-------------|
-| `make format` | Black formatter on cli.py, weaviate_cli/, test/ |
-| `make lint` | Black --check (CI-equivalent) |
+| `make format` | Ruff formatter on `cli.py`, `weaviate_cli/`, and `test/` |
+| `make lint` | Check Ruff lint rules and formatting without writing files |
+| `make typecheck` | Run Pyright on the CLI and tests using the active Python environment |
 | `make test` | pytest test/unittests |
 | `make build-all` | Build package + twine check |
 | `make all` | format + lint + test + build-all |
@@ -34,7 +35,7 @@ make test           # Run unit tests
 
 - Every command **must** have `--json` support (parameter named `json_output`)
 - Defaults live in `defaults.py` as dataclasses
-- Black formatting (default settings, 88 char line length)
+- Ruff formatting (88-character line length)
 - Client lifecycle: get in `try`, close in `finally`, `sys.exit(1)` on error
 - Error format: `click.echo(f"Error: {e}")`
 

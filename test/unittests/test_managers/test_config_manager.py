@@ -34,7 +34,7 @@ def test_check_host_docker_internal(mock_socket):
 
     # Test successful connection
     mock_socket.return_value = MagicMock()
-    assert config._ConfigManager__check_host_docker_internal() == True
+    assert config._ConfigManager__check_host_docker_internal() is True
 
 
 @patch("socket.create_connection")
@@ -43,7 +43,7 @@ def test_check_host_docker_internal_failed(mock_socket):
 
     # Test failed connection
     mock_socket.side_effect = OSError()
-    assert config._ConfigManager__check_host_docker_internal() == False
+    assert config._ConfigManager__check_host_docker_internal() is False
 
 
 def test_init_with_user():
@@ -171,8 +171,8 @@ def test_get_client_with_ip_address():
         assert call_kwargs["grpc_host"] == "127.0.0.1"
         assert call_kwargs["http_port"] == 8080
         assert call_kwargs["grpc_port"] == 50051
-        assert call_kwargs["http_secure"] == False
-        assert call_kwargs["grpc_secure"] == False
+        assert call_kwargs["http_secure"] is False
+        assert call_kwargs["grpc_secure"] is False
 
 
 def test_get_client_with_ip_address_and_secure_ports():
@@ -198,8 +198,8 @@ def test_get_client_with_ip_address_and_secure_ports():
         assert call_kwargs["grpc_host"] == "127.0.0.1"
         assert call_kwargs["http_port"] == 443
         assert call_kwargs["grpc_port"] == 443
-        assert call_kwargs["http_secure"] == True
-        assert call_kwargs["grpc_secure"] == True
+        assert call_kwargs["http_secure"] is True
+        assert call_kwargs["grpc_secure"] is True
 
 
 def test_get_client_with_ip_address_with_https():
@@ -225,8 +225,8 @@ def test_get_client_with_ip_address_with_https():
         assert call_kwargs["grpc_host"] == "85.10.20.31"
         assert call_kwargs["http_port"] == 443
         assert call_kwargs["grpc_port"] == 443
-        assert call_kwargs["http_secure"] == True
-        assert call_kwargs["grpc_secure"] == True
+        assert call_kwargs["http_secure"] is True
+        assert call_kwargs["grpc_secure"] is True
 
 
 def test_get_client_with_host_and_custom():
@@ -250,8 +250,8 @@ def test_get_client_with_host_and_custom():
         assert call_kwargs["grpc_host"] == "grpc.weaviate.google.my-cloud.com"
         assert call_kwargs["http_port"] == 443
         assert call_kwargs["grpc_port"] == 443
-        assert call_kwargs["http_secure"] == True
-        assert call_kwargs["grpc_secure"] == True
+        assert call_kwargs["http_secure"] is True
+        assert call_kwargs["grpc_secure"] is True
 
 
 def test_get_client_with_host_and_custom_with_ports():
@@ -277,5 +277,5 @@ def test_get_client_with_host_and_custom_with_ports():
         assert call_kwargs["grpc_host"] == "grpc.weaviate.google.my-cloud.com"
         assert call_kwargs["http_port"] == 8080
         assert call_kwargs["grpc_port"] == 8080
-        assert call_kwargs["http_secure"] == True  # URL contains https
-        assert call_kwargs["grpc_secure"] == True  # URL contains https
+        assert call_kwargs["http_secure"] is True  # URL contains https
+        assert call_kwargs["grpc_secure"] is True  # URL contains https

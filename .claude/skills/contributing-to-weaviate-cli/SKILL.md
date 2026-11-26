@@ -27,8 +27,9 @@ make install-dev          # pip install -r requirements-dev.txt + pre-commit ins
 
 Key development commands:
 ```bash
-make format               # Black formatter on cli.py, weaviate_cli/, test/
-make lint                 # Black --check (CI-equivalent)
+make format               # Ruff formatter on cli.py, weaviate_cli/, test/
+make lint                 # Check Ruff lint rules and formatting
+make typecheck            # Pyright on CLI and tests
 make test                 # pytest test/unittests
 make build-all            # python -m build + twine check
 make all                  # format + lint + test + build-all
@@ -245,7 +246,7 @@ lint-and-format (Black + build check)
 2. New command has `--json` support
 3. Defaults dataclass added/updated in `defaults.py`
 4. Unit test covers happy path and error cases
-5. Black formatting passes (`make lint`)
+5. Ruff lint and formatting pass (`make lint`)
 6. No hardcoded paths or credentials
 7. Error messages follow `Error: <description>` pattern
 8. Client is properly closed in `finally` block

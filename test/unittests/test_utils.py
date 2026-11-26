@@ -61,7 +61,6 @@ def test_parse_permission_collections():
 
 
 def test_parse_permissions_tenant():
-
     assert parse_permission("create_tenants:Movies") == Permissions.tenants(
         collection="Movies", create=True
     )
@@ -113,7 +112,6 @@ def test_parse_permission_data():
 
 
 def test_parse_permission_roles():
-
     # Test basic role permissions
     assert parse_permission("read_roles:custom") == Permissions.roles(
         role="custom", read=True

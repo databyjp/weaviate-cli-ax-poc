@@ -441,9 +441,8 @@ class TestDeleteTenants:
             f"Tenant-{i}": _make_tenant(TenantActivityStatus.ACTIVE) for i in range(5)
         }
         mock_collection.tenants.get.return_value = tenants
-        mock_collection.tenants.get_by_names.return_value = (
-            {}
-        )  # verification: all deleted
+        # Verification finds no remaining tenants.
+        mock_collection.tenants.get_by_names.return_value = {}
 
         manager.delete_tenants(
             collection="TestCollection",

@@ -195,7 +195,7 @@ def test_get_shards_objects_populated_cluster(mock_client, populated_cluster_nod
     assert shard.collection == "PreUpgradeEnableAsyncReplicationWithInconsistency"
     assert shard.node_objects == {"weaviate-0": 146, "weaviate-1": 146}
     assert shard.vector_indexing_status == "READY"
-    assert shard.loaded == True
+    assert shard.loaded is True
 
 
 def test_get_collections_objects_empty_cluster(mock_client, empty_cluster_nodes):
@@ -248,7 +248,7 @@ def test_get_collection_shards(mock_client, populated_cluster_nodes):
     assert shards[0].name == "LqOOCO4oujNl"
     assert shards[0].node_objects == {"weaviate-0": 146, "weaviate-1": 146}
     assert shards[0].vector_indexing_status == "READY"
-    assert shards[0].loaded == True
+    assert shards[0].loaded is True
 
 
 def test_get_collection_shards_nonexistent_collection(

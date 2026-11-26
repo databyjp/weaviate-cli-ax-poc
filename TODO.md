@@ -69,6 +69,7 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - [ ] Record evaluation metrics (completion rate, turns/tool calls, tokens, zero-hang rate, error recovery, routing accuracy) to inform the post-PoC decision: keep Python or consolidate into the Go `wcloud` binary.
 
 ### Deferred post-PoC ideas
+- Review CI/CD adoption of `make lint` (Ruff) and `make typecheck` (Pyright). Resolve outstanding type errors before making type checking a required PR check. Remove the Black dependency and configuration when CI no longer uses them.
 - Local-to-Weaviate Cloud migration command (`migrate`):
   - Tier 1 (DDL/metadata): copy collection schemas, tenants, and aliases from local to WCD, automatically rewriting `text2vec-transformers` to `text2vec-weaviate` (`Snowflake/snowflake-arctic-embed-m-v1.5`), with `--dry-run` preview.
   - Tier 2 (prototype data copy): stream objects (and optionally precomputed vectors) for small local dev datasets, after empirically verifying vector-space parity (pooling, normalization, query prefix) between local `snowflake-snowflake-arctic-embed-m-v1.5-onnx` and WCD `text2vec-weaviate`.

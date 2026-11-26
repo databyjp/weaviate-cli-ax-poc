@@ -168,7 +168,6 @@ def test_delete_nonexistent_collection(mock_client):
 
 
 def test_update_collection(mock_client, mock_wvc_object_ttl):
-
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
     mock_client.collections.exists.side_effect = [True, True]

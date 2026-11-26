@@ -223,7 +223,6 @@ class TenantManager:
         """
 
         if not self.client.collections.exists(collection):
-
             raise Exception(
                 f"Class '{collection}' does not exist in Weaviate. Create first using <create class> command"
             )
@@ -231,7 +230,6 @@ class TenantManager:
         collection = self.client.collections.get(collection)
 
         if not collection.config.get().multi_tenancy_config.enabled:
-
             raise Exception(
                 f"Collection '{collection.name}' does not have multi-tenancy enabled. Recreate or modify the class with <create class> command"
             )
@@ -273,9 +271,10 @@ class TenantManager:
 
         # Verify deletion
         remaining = collection.tenants.get_by_names(list(deleting_tenants.keys()))
-        assert (
-            len(remaining) == 0
-        ), f"Expected all {len(deleting_tenants)} tenants to be deleted, but {len(remaining)} still exist"
+        assert len(remaining) == 0, (
+            f"Expected all {len(deleting_tenants)} tenants to be deleted, "
+            f"but {len(remaining)} still exist"
+        )
 
         if json_output:
             click.echo(
@@ -418,7 +417,6 @@ class TenantManager:
         """
 
         if not self.client.collections.exists(collection):
-
             raise Exception(
                 f"Class '{collection}' does not exist in Weaviate. Create first using ./create_class.py"
             )
@@ -427,7 +425,6 @@ class TenantManager:
         collection = self.client.collections.get(collection)
 
         if not collection.config.get().multi_tenancy_config.enabled:
-
             raise Exception(
                 f"Collection '{collection.name}' does not have multi-tenancy enabled. Recreate or modify the class with ./create_class.py"
             )
@@ -458,7 +455,6 @@ class TenantManager:
             }
 
         if tenants is None and len(tenants_with_suffix) < number_tenants:
-
             raise Exception(
                 f"Not enough tenants present in class {collection.name} with suffix {tenant_suffix}. Expected {number_tenants}, found {len(tenants_with_suffix)}."
             )
@@ -494,17 +490,14 @@ class TenantManager:
         else:
             tenants_list = collection.tenants.get_by_names(list(existing_tenants))
         if tenants is None:
-            assert (
-                len(tenants_list) == number_tenants
-            ), f"Expected {number_tenants} tenants, but found {len(tenants_list)}"
+            expected = number_tenants
         else:
             clean = [t.strip() for t in tenants.split(",") if t.strip()]
-            assert len(tenants_list) == len(
-                clean
-            ), f"Expected {len(clean)} tenants, but found {len(tenants_list)}"
+            expected = len(clean)
+        actual = len(tenants_list)
+        assert actual == expected, f"Expected {expected} tenants, but found {actual}"
         for tenant in tenants_list.values():
             if tenant.activity_status != equivalent_state_map[state]:
-
                 raise Exception(
                     f"Tenant '{tenant.name}' has activity status '{tenant.activity_status}', but expected '{tenant_state_map[state]}'"
                 )

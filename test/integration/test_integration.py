@@ -8,18 +8,18 @@ from weaviate_cli.managers.shard_manager import ShardManager
 
 
 @pytest.fixture
-def client() -> weaviate.Client:
+def client() -> weaviate.WeaviateClient:
     config = ConfigManager()
     return config.get_client()
 
 
 @pytest.fixture
-def collection_manager(client: weaviate.Client) -> CollectionManager:
+def collection_manager(client: weaviate.WeaviateClient) -> CollectionManager:
     return CollectionManager(client)
 
 
 @pytest.fixture
-def shard_manager(client: weaviate.Client) -> ShardManager:
+def shard_manager(client: weaviate.WeaviateClient) -> ShardManager:
     return ShardManager(client)
 
 
