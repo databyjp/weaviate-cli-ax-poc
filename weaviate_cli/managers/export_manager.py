@@ -1,18 +1,18 @@
 import json
+
 import click
-from typing import Optional
 from weaviate.client import WeaviateClient
 from weaviate.export.export import (
     ExportFileFormat,
-    ExportStorage,
     ExportStatusReturn,
-)
-from weaviate_cli.defaults import (
-    CreateExportCollectionDefaults,
-    GetExportCollectionDefaults,
-    CancelExportCollectionDefaults,
+    ExportStorage,
 )
 
+from weaviate_cli.defaults import (
+    CancelExportCollectionDefaults,
+    CreateExportCollectionDefaults,
+    GetExportCollectionDefaults,
+)
 
 BACKEND_MAP = {
     "filesystem": ExportStorage.FILESYSTEM,
@@ -53,8 +53,8 @@ class ExportManager:
         export_id: str = CreateExportCollectionDefaults.export_id,
         backend: str = CreateExportCollectionDefaults.backend,
         file_format: str = CreateExportCollectionDefaults.file_format,
-        include: Optional[str] = CreateExportCollectionDefaults.include,
-        exclude: Optional[str] = CreateExportCollectionDefaults.exclude,
+        include: str | None = CreateExportCollectionDefaults.include,
+        exclude: str | None = CreateExportCollectionDefaults.exclude,
         wait: bool = CreateExportCollectionDefaults.wait,
         json_output: bool = False,
     ) -> None:

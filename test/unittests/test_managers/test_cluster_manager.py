@@ -1,9 +1,9 @@
 import json
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, call
 
 from weaviate_cli.managers.cluster_manager import ClusterManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers

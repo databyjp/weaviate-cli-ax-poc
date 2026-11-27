@@ -1,5 +1,7 @@
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
+
 from weaviate_cli.managers.shard_manager import ShardManager
 
 

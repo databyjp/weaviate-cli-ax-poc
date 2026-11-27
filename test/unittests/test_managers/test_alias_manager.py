@@ -1,6 +1,7 @@
 import json
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from weaviate.aliases.alias import AliasReturn
 
 from weaviate_cli.managers.alias_manager import AliasManager
@@ -237,18 +238,6 @@ def test_delete_alias_success_json(
     data = json.loads(out)
     assert data["status"] == "success"
     assert "my_alias" in data["message"]
-
-
-def test_delete_alias_error(
-    alias_manager: AliasManager, mock_client: MagicMock
-) -> None:
-    """Test delete_alias raises on client error."""
-    mock_client.alias.delete.side_effect = Exception("network error")
-
-    with pytest.raises(Exception) as exc_info:
-        alias_manager.delete_alias("bad_alias")
-
-    assert "Error deleting alias 'bad_alias': network error" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

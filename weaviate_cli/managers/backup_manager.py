@@ -1,14 +1,15 @@
 import json
-import semver
+
 import click
-from typing import Optional
-from weaviate.backup.backup import BackupConfigCreate
+import semver
+from weaviate.backup.backup import BackupConfigCreate, BackupReturn, BackupStorage
 from weaviate.client import WeaviateClient
+
 from weaviate_cli.defaults import (
     CancelBackupDefaults,
     CreateBackupDefaults,
-    RestoreBackupDefaults,
     GetBackupDefaults,
+    RestoreBackupDefaults,
 )
 
 
@@ -20,16 +21,15 @@ class BackupManager:
         self,
         backup_id: str = CreateBackupDefaults.backup_id,
         backend: str = CreateBackupDefaults.backend,
-        include: Optional[str] = CreateBackupDefaults.include,
-        exclude: Optional[str] = CreateBackupDefaults.exclude,
+        include: str | None = CreateBackupDefaults.include,
+        exclude: str | None = CreateBackupDefaults.exclude,
         wait: bool = CreateBackupDefaults.wait,
         cpu_for_backup: int = CreateBackupDefaults.cpu_for_backup,
         json_output: bool = False,
-        incremental_base_backup_id: Optional[
-            str
-        ] = CreateBackupDefaults.incremental_base_backup_id,
+        incremental_base_backup_id: (
+            str | None
+        ) = CreateBackupDefaults.incremental_base_backup_id,
     ) -> None:
-
         version = semver.Version.parse(self.client.get_meta()["version"])
         if include:
             for collection in include.split(","):
@@ -46,7 +46,7 @@ class BackupManager:
 
         result = self.client.backup.create(
             backup_id=backup_id,
-            backend=backend,
+            backend=BackupStorage(backend.lower()),
             incremental_base_backup_id=incremental_base_backup_id,
             include_collections=include.split(",") if include else None,
             exclude_collections=exclude.split(",") if exclude else None,
@@ -82,16 +82,15 @@ class BackupManager:
         self,
         backup_id: str = RestoreBackupDefaults.backup_id,
         backend: str = RestoreBackupDefaults.backend,
-        include: Optional[str] = RestoreBackupDefaults.include,
-        exclude: Optional[str] = RestoreBackupDefaults.exclude,
+        include: str | None = RestoreBackupDefaults.include,
+        exclude: str | None = RestoreBackupDefaults.exclude,
         wait: bool = RestoreBackupDefaults.wait,
         override_alias: bool = RestoreBackupDefaults.override_alias,
         json_output: bool = False,
     ) -> None:
-
         result = self.client.backup.restore(
             backup_id=backup_id,
-            backend=backend,
+            backend=BackupStorage(backend.lower()),
             include_collections=include.split(",") if include else None,
             exclude_collections=exclude.split(",") if exclude else None,
             overwrite_alias=override_alias,
@@ -99,7 +98,6 @@ class BackupManager:
         )
 
         if wait and result and result.status.value != "SUCCESS":
-
             raise Exception(
                 f"Backup '{backup_id}' failed with status '{result.status.value}'"
             )
@@ -120,61 +118,36 @@ class BackupManager:
     def get_backup(
         self,
         backend: str = GetBackupDefaults.backend,
-        backup_id: str = GetBackupDefaults.backup_id,
+        backup_id: str | None = GetBackupDefaults.backup_id,
         restore: bool = GetBackupDefaults.restore,
         json_output: bool = False,
     ) -> None:
+        if backup_id is None:
+            if restore:
+                raise ValueError("A backup ID is required for restore status.")
+            raise Exception("This functionality is not supported yet.")
 
-        if restore:
-            backup = self.client.backup.get_restore_status(
-                backup_id=backup_id,
-                backend=backend,
-            )
-            data = {
+        get_status = (
+            self.client.backup.get_restore_status
+            if restore
+            else self.client.backup.get_create_status
+        )
+        backup = get_status(backup_id=backup_id, backend=BackupStorage(backend.lower()))
+        if json_output:
+            data: dict[str, str | list[str]] = {
                 "backup_id": backup.backup_id,
                 "path": backup.path,
                 "status": str(backup.status),
             }
-            if "collections" in backup:
+            if isinstance(backup, BackupReturn):
                 data["collections"] = backup.collections
-            if json_output:
-                click.echo(json.dumps(data, indent=2, default=str))
-            else:
-                print(f"Backup ID: {backup.backup_id}")
-                print(f"Backup Path: {backup.path}")
-                print(f"Backup Status: {backup.status}")
-                if "collections" in backup:
-                    print(f"Collections: {backup.collections}")
+            click.echo(json.dumps(data, indent=2, default=str))
         else:
-            if backup_id is not None:
-                backup = self.client.backup.get_create_status(
-                    backup_id=backup_id, backend=backend
-                )
-                data = {
-                    "backup_id": backup.backup_id,
-                    "path": backup.path,
-                    "status": str(backup.status),
-                }
-                if "collections" in backup:
-                    data["collections"] = backup.collections
-                if json_output:
-                    click.echo(json.dumps(data, indent=2, default=str))
-                else:
-                    print(f"Backup ID: {backup.backup_id}")
-                    print(f"Backup Path: {backup.path}")
-                    print(f"Backup Status: {backup.status}")
-                    if "collections" in backup:
-                        print(f"Collections: {backup.collections}")
-            else:
-                raise Exception("This functionality is not supported yet.")
-                # backups = client.backup.list_backups(backend=backend)
-                # for backup in backups:
-                #     print(f"Backup ID: {backup.backup_id}")
-                #     print(f"Backup Path: {backup.path}")
-                #     print(f"Backup Status: {backup.status}")
-                #     if "collections" in backup:
-                #       print(f"Collections: {backup.collections}")
-                #     print("------------------------------")
+            print(f"Backup ID: {backup.backup_id}")
+            print(f"Backup Path: {backup.path}")
+            print(f"Backup Status: {backup.status}")
+            if isinstance(backup, BackupReturn):
+                print(f"Collections: {backup.collections}")
 
     def cancel_backup(
         self,
@@ -182,7 +155,8 @@ class BackupManager:
         backup_id: str = CancelBackupDefaults.backup_id,
         json_output: bool = False,
     ) -> None:
-        if self.client.backup.cancel(backend=backend, backup_id=backup_id):
+        storage = BackupStorage(backend.lower())
+        if self.client.backup.cancel(backend=storage, backup_id=backup_id):
             if json_output:
                 click.echo(
                     json.dumps(
@@ -197,7 +171,7 @@ class BackupManager:
                 click.echo(f"Backup '{backup_id}' cancelled successfully in Weaviate.")
         else:
             backup_status = self.client.backup.get_create_status(
-                backend=backend, backup_id=backup_id
+                backend=storage, backup_id=backup_id
             )
             raise Exception(
                 f"Error: Backup '{backup_id}' could not be cancelled in Weaviate. Current status: {backup_status.status}"

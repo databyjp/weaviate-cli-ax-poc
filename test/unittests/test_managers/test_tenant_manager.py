@@ -1,17 +1,10 @@
 import json
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 from weaviate.collections.classes.tenants import TenantActivityStatus
 
 from weaviate_cli.managers.tenant_manager import TenantManager
-from weaviate_cli.defaults import (
-    CreateTenantsDefaults,
-    DeleteTenantsDefaults,
-    GetTenantsDefaults,
-    UpdateTenantsDefaults,
-)
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -448,9 +441,8 @@ class TestDeleteTenants:
             f"Tenant-{i}": _make_tenant(TenantActivityStatus.ACTIVE) for i in range(5)
         }
         mock_collection.tenants.get.return_value = tenants
-        mock_collection.tenants.get_by_names.return_value = (
-            {}
-        )  # verification: all deleted
+        # Verification finds no remaining tenants.
+        mock_collection.tenants.get_by_names.return_value = {}
 
         manager.delete_tenants(
             collection="TestCollection",

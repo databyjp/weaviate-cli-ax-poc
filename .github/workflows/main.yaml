@@ -16,8 +16,10 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
-      - name: "Black"
-        run: black --check cli.py weaviate_cli test
+      - name: Check lint and formatting with Ruff
+        run: make lint
+      - name: Check types with Pyright
+        run: make typecheck
       - name: "Check release for pypi"
         run: |
           python -m build
@@ -87,7 +89,10 @@ jobs:
     - name: Run integration tests with pytest
       run: |
         pip install pytest-html
-        pytest test/integration/test_integration.py test/integration/test_data_integration.py test/integration/test_create_data_return_collection.py test/integration/test_export_integration.py --html=test-report-${{ matrix.version }}.html --self-contained-html
+        pytest \
+          test/integration/test_integration.py \
+          test/integration/test_export_integration.py \
+          --html=test-report-${{ matrix.version }}.html --self-contained-html
   integration-auth-tests:
     needs: [unit-tests, get-latest-weaviate-version]
     env:

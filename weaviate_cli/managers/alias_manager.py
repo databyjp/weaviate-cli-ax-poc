@@ -1,8 +1,8 @@
 import json
-from typing import Optional
+
 import click
-from weaviate.client import WeaviateClient
 from weaviate.aliases.alias import AliasReturn
+from weaviate.client import WeaviateClient
 
 
 class AliasManager:
@@ -31,7 +31,7 @@ class AliasManager:
                     f"Alias '{alias_name}' to collection '{collection}' created successfully."
                 )
         except Exception as e:
-            raise Exception(f"Error creating alias '{alias_name}': {e}")
+            raise Exception(f"Error creating alias '{alias_name}': {e}") from e
 
     def update_alias(
         self, alias_name: str, collection: str, json_output: bool = False
@@ -55,13 +55,13 @@ class AliasManager:
                     f"Alias '{alias_name}' to collection '{collection}' updated successfully."
                 )
         except Exception as e:
-            raise Exception(f"Error updating alias '{alias_name}': {e}")
+            raise Exception(f"Error updating alias '{alias_name}': {e}") from e
 
-    def get_alias(self, alias_name: str) -> AliasReturn:
+    def get_alias(self, alias_name: str) -> AliasReturn | None:
         try:
             return self.client.alias.get(alias_name=alias_name)
         except Exception as e:
-            raise Exception(f"Error getting alias '{alias_name}': {e}")
+            raise Exception(f"Error getting alias '{alias_name}': {e}") from e
 
     def delete_alias(self, alias_name: str, json_output: bool = False) -> None:
         try:
@@ -79,13 +79,13 @@ class AliasManager:
             else:
                 click.echo(f"Alias '{alias_name}' deleted successfully.")
         except Exception as e:
-            raise Exception(f"Error deleting alias '{alias_name}': {e}")
+            raise Exception(f"Error deleting alias '{alias_name}': {e}") from e
 
-    def list_aliases(self, collection: Optional[str] = None) -> dict[str, AliasReturn]:
+    def list_aliases(self, collection: str | None = None) -> dict[str, AliasReturn]:
         try:
             return self.client.alias.list_all(collection=collection)
         except Exception as e:
-            raise Exception(f"Error listing aliases: {e}")
+            raise Exception(f"Error listing aliases: {e}") from e
 
     def print_alias(self, alias: AliasReturn, json_output: bool = False) -> None:
         if json_output:

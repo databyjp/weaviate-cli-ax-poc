@@ -209,7 +209,7 @@ from weaviate_cli.managers.widget_manager import WidgetManager
 - [ ] Manager with `print_json_or_text()` output
 - [ ] Unit test (happy path + error path)
 - [ ] Import in command file
-- [ ] Black formatting passes (`make format && make lint`)
+- [ ] Ruff lint and formatting pass (`make lint`)
 - [ ] Skill documentation updated
 - [ ] PR created with `Closes #N` linking to the issue
 - [ ] `draft` label removed from issue

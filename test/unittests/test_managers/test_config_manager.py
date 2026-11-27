@@ -1,9 +1,10 @@
-import socket
+import json
+from unittest.mock import MagicMock, mock_open, patch
+
 import pytest
 import weaviate
-from unittest.mock import MagicMock, mock_open, patch
+
 from weaviate_cli.managers.config_manager import ConfigManager
-import json
 
 
 def test_init_with_config_file():
@@ -31,7 +32,7 @@ def test_check_host_docker_internal(mock_socket):
 
     # Test successful connection
     mock_socket.return_value = MagicMock()
-    assert config._ConfigManager__check_host_docker_internal() == True
+    assert config._ConfigManager__check_host_docker_internal() is True  # type: ignore[attr-defined]
 
 
 @patch("socket.create_connection")
@@ -39,8 +40,8 @@ def test_check_host_docker_internal_failed(mock_socket):
     config = ConfigManager()
 
     # Test failed connection
-    mock_socket.side_effect = socket.error()
-    assert config._ConfigManager__check_host_docker_internal() == False
+    mock_socket.side_effect = OSError()
+    assert config._ConfigManager__check_host_docker_internal() is False  # type: ignore[attr-defined]
 
 
 def test_init_with_user():
@@ -162,8 +163,8 @@ def test_get_client_with_ip_address():
                 assert call_kwargs["grpc_host"] == "127.0.0.1"
                 assert call_kwargs["http_port"] == 8080
                 assert call_kwargs["grpc_port"] == 50051
-                assert call_kwargs["http_secure"] == False
-                assert call_kwargs["grpc_secure"] == False
+                assert call_kwargs["http_secure"] is False
+                assert call_kwargs["grpc_secure"] is False
 
 
 def test_get_client_with_ip_address_and_secure_ports():
@@ -187,8 +188,8 @@ def test_get_client_with_ip_address_and_secure_ports():
                 assert call_kwargs["grpc_host"] == "127.0.0.1"
                 assert call_kwargs["http_port"] == 443
                 assert call_kwargs["grpc_port"] == 443
-                assert call_kwargs["http_secure"] == True
-                assert call_kwargs["grpc_secure"] == True
+                assert call_kwargs["http_secure"] is True
+                assert call_kwargs["grpc_secure"] is True
 
 
 def test_get_client_with_ip_address_with_https():
@@ -212,8 +213,8 @@ def test_get_client_with_ip_address_with_https():
                 assert call_kwargs["grpc_host"] == "85.10.20.31"
                 assert call_kwargs["http_port"] == 443
                 assert call_kwargs["grpc_port"] == 443
-                assert call_kwargs["http_secure"] == True
-                assert call_kwargs["grpc_secure"] == True
+                assert call_kwargs["http_secure"] is True
+                assert call_kwargs["grpc_secure"] is True
 
 
 def test_get_client_with_host_and_custom():
@@ -235,8 +236,8 @@ def test_get_client_with_host_and_custom():
                 assert call_kwargs["grpc_host"] == "grpc.weaviate.google.my-cloud.com"
                 assert call_kwargs["http_port"] == 443
                 assert call_kwargs["grpc_port"] == 443
-                assert call_kwargs["http_secure"] == True
-                assert call_kwargs["grpc_secure"] == True
+                assert call_kwargs["http_secure"] is True
+                assert call_kwargs["grpc_secure"] is True
 
 
 def test_get_client_with_host_and_custom_with_ports():
@@ -260,5 +261,267 @@ def test_get_client_with_host_and_custom_with_ports():
                 assert call_kwargs["grpc_host"] == "grpc.weaviate.google.my-cloud.com"
                 assert call_kwargs["http_port"] == 8080
                 assert call_kwargs["grpc_port"] == 8080
-                assert call_kwargs["http_secure"] == True  # URL contains https
-                assert call_kwargs["grpc_secure"] == True  # URL contains https
+                assert call_kwargs["http_secure"] is True  # URL contains https
+                assert call_kwargs["grpc_secure"] is True  # URL contains https
+
+
+def test_env_vars_override_config_file_and_connect_wcd():
+    config_data = {"host": "localhost", "http_port": 8080, "grpc_port": 50051}
+    env = {
+        "WEAVIATE_URL": "https://demo.c0.us-west3.gcp.weaviate.cloud/",
+        "WEAVIATE_API_KEY": "env-secret",
+    }
+
+    with patch("builtins.open", mock_open(read_data=json.dumps(config_data))):
+        with patch("os.path.isfile", return_value=True):
+            with patch("weaviate.connect_to_weaviate_cloud") as mock_connect:
+                config = ConfigManager(config_file="test_config.json", env=env)
+                assert config.source == "env"
+                config.get_client()
+
+                mock_connect.assert_called_once()
+                kwargs = mock_connect.call_args.kwargs
+                assert (
+                    kwargs["cluster_url"]
+                    == "https://demo.c0.us-west3.gcp.weaviate.cloud"
+                )
+                assert kwargs["auth_credentials"].api_key == "env-secret"
+
+
+def test_cli_flags_override_env_vars():
+    env = {
+        "WEAVIATE_URL": "https://env.c0.us-west3.gcp.weaviate.cloud",
+        "WEAVIATE_API_KEY": "env-secret",
+    }
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_weaviate_cloud") as mock_connect:
+            config = ConfigManager(
+                url="https://flag.c0.us-west3.gcp.weaviate.cloud",
+                api_key="flag-secret",
+                env=env,
+            )
+            assert config.source == "flag"
+            config.get_client()
+
+            kwargs = mock_connect.call_args.kwargs
+            assert (
+                kwargs["cluster_url"] == "https://flag.c0.us-west3.gcp.weaviate.cloud"
+            )
+            assert kwargs["auth_credentials"].api_key == "flag-secret"
+
+
+def test_env_custom_url_without_grpc_url_derives_grpc_host():
+    env = {"WEAVIATE_URL": "http://127.0.0.1:8080"}
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_custom") as mock_connect:
+            config = ConfigManager(env=env)
+            config.get_client()
+
+            kwargs = mock_connect.call_args.kwargs
+            assert kwargs["http_host"] == "127.0.0.1"
+            assert kwargs["http_port"] == 8080
+            assert kwargs["grpc_host"] == "127.0.0.1"
+            assert kwargs["grpc_port"] == 50051
+            assert kwargs["http_secure"] is False
+            assert kwargs["grpc_secure"] is False
+
+
+@pytest.mark.parametrize("async_client", [False, True])
+@pytest.mark.parametrize(
+    ("target", "http_host", "http_port"),
+    [
+        ("localhost", "localhost", 8080),
+        ("demo.weaviate.cloud", "demo.weaviate.cloud", 443),
+        ("http://custom:8081", "custom", 8081),
+    ],
+)
+def test_explicit_grpc_target_matches_config_show(
+    tmp_path, async_client, target, http_host, http_port
+):
+    config = ConfigManager(
+        url=target, grpc_url="https://proxy:7443", env={"HOME": str(tmp_path)}
+    )
+    constructor = (
+        "weaviate.use_async_with_custom"
+        if async_client
+        else "weaviate.connect_to_custom"
+    )
+    with (
+        patch(constructor) as connect,
+        patch("socket.create_connection", side_effect=OSError),
+    ):
+        (config.get_async_client if async_client else config.get_client)()
+    kwargs = connect.call_args.kwargs
+    assert (kwargs["http_host"], kwargs["http_port"], kwargs["http_secure"]) == (
+        http_host,
+        http_port,
+        http_port == 443,
+    )
+    assert config.describe_connection()["grpc"] == {
+        "host": "proxy",
+        "port": 7443,
+        "secure": True,
+    }
+    assert {
+        k: kwargs[f"grpc_{k}"] for k in ("host", "port", "secure")
+    } == config.describe_connection()["grpc"]
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_host", "expected_port"),
+    [
+        ("http://cluster-b:8080", "cluster-b", 50051),
+        ("http://cluster-a:8080/", "proxy-a", 55051),
+    ],
+)
+def test_rest_override_inherits_grpc_only_for_same_target(
+    tmp_path, url, expected_host, expected_port
+):
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps(
+            {
+                "host": "http://cluster-a:8080",
+                "grpc_host": "proxy-a",
+                "grpc_port": 55051,
+            }
+        )
+    )
+    config = ConfigManager(config_file=str(profile), url=url, env={})
+    with patch("weaviate.connect_to_custom") as connect:
+        config.get_client()
+    assert connect.call_args.kwargs["grpc_host"] == expected_host
+    assert connect.call_args.kwargs["grpc_port"] == expected_port
+
+
+def test_grpc_url_accepts_schemeless_host_port():
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_custom") as mock_connect:
+            config = ConfigManager(
+                url="http://127.0.0.1:18080",
+                grpc_url="127.0.0.1:51051",
+                env={},
+            )
+            config.get_client()
+
+            kwargs = mock_connect.call_args.kwargs
+            assert kwargs["http_host"] == "127.0.0.1"
+            assert kwargs["http_port"] == 18080
+            assert kwargs["grpc_host"] == "127.0.0.1"
+            assert kwargs["grpc_port"] == 51051
+            assert kwargs["grpc_secure"] is False
+
+
+def test_wcd_grpc_fallback_warning_routes_to_stderr(capsys):
+    from weaviate.exceptions import WeaviateGRPCUnavailableError
+
+    env = {
+        "WEAVIATE_URL": "https://demo.c0.us-west3.gcp.weaviate.cloud",
+        "WEAVIATE_API_KEY": "secret",
+    }
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_weaviate_cloud") as mock_connect:
+            mock_connect.side_effect = [
+                WeaviateGRPCUnavailableError("grpc down"),
+                MagicMock(),
+            ]
+            config = ConfigManager(env=env)
+            config.get_client()
+
+            captured = capsys.readouterr()
+            assert captured.out == ""
+            assert "gRPC connection seems unavailable" in captured.err
+
+
+def test_env_file_loads_and_overrides_ambient_env_without_mixing(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# Local sandbox\n"
+        'export WEAVIATE_URL="http://127.0.0.1:8080/" # inline comment\n',
+        encoding="utf-8",
+    )
+    ambient_env = {
+        "WEAVIATE_URL": "https://prod.c0.us-west3.gcp.weaviate.cloud",
+        "WEAVIATE_API_KEY": "prod-secret-should-not-leak",
+    }
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_custom") as mock_connect:
+            config = ConfigManager(env_file=str(env_file), env=ambient_env)
+            assert config.source == "env_file"
+            assert "auth" not in config.config
+            config.get_client()
+
+            kwargs = mock_connect.call_args.kwargs
+            assert kwargs["http_host"] == "127.0.0.1"
+            assert kwargs["http_port"] == 8080
+            assert kwargs["auth_credentials"] is None
+
+
+def test_cli_flags_override_env_file(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "WEAVIATE_URL=https://file.c0.us-west3.gcp.weaviate.cloud\n"
+        "WEAVIATE_API_KEY='file-secret'\n",
+        encoding="utf-8",
+    )
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_weaviate_cloud") as mock_connect:
+            config = ConfigManager(
+                env_file=str(env_file),
+                url="https://flag.c0.us-west3.gcp.weaviate.cloud",
+                api_key="flag-secret",
+                env={},
+            )
+            assert config.source == "flag"
+            config.get_client()
+
+            kwargs = mock_connect.call_args.kwargs
+            assert (
+                kwargs["cluster_url"] == "https://flag.c0.us-west3.gcp.weaviate.cloud"
+            )
+            assert kwargs["auth_credentials"].api_key == "flag-secret"
+
+
+def test_env_file_missing_raises_usage_error(tmp_path):
+    from weaviate_cli.errors import CLIError, ExitCode
+
+    with patch("pathlib.Path.exists", return_value=False):
+        with pytest.raises(CLIError) as exc_info:
+            ConfigManager(env_file=str(tmp_path / "missing.env"), env={})
+    assert exc_info.value.code == "ENV_FILE_NOT_FOUND"
+    assert exc_info.value.exit_code == ExitCode.USAGE
+
+
+def test_env_file_with_unrecognized_keys_hints_canonical_without_leaking_secret(
+    tmp_path,
+):
+    from weaviate_cli.errors import CLIError, ExitCode
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "WEAVIATE_CLOUD_URL=https://demo.weaviate.cloud\n"
+        "WEAVIATE_CLOUD_API_KEY=super-secret-value\n",
+        encoding="utf-8",
+    )
+    with patch("pathlib.Path.exists", return_value=False):
+        with pytest.raises(CLIError) as exc_info:
+            ConfigManager(env_file=str(env_file), env={})
+    err = exc_info.value
+    assert err.code == "INVALID_ENV_FILE"
+    assert err.exit_code == ExitCode.USAGE
+    assert err.hint and "WEAVIATE_CLOUD_URL" in err.hint
+    assert "super-secret-value" not in err.message
+    assert "super-secret-value" not in (err.hint or "")
+
+
+def test_env_file_invalid_syntax_raises_invalid_env_file(tmp_path):
+    from weaviate_cli.errors import CLIError, ExitCode
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("NOT_A_VALID_LINE\n", encoding="utf-8")
+    with patch("pathlib.Path.exists", return_value=False):
+        with pytest.raises(CLIError) as exc_info:
+            ConfigManager(env_file=str(env_file), env={})
+    assert exc_info.value.code == "INVALID_ENV_FILE"
+    assert exc_info.value.exit_code == ExitCode.USAGE
+    assert "line 1" in exc_info.value.message

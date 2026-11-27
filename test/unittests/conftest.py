@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock
+
 import pytest
 import weaviate
-from unittest.mock import MagicMock, patch
+
 from weaviate_cli.managers.config_manager import ConfigManager
 
 

@@ -1,468 +1,226 @@
 ---
 name: operating-weaviate-cli
 description: >-
-  Operates Weaviate vector databases through the weaviate-cli tool. Use this
-  skill whenever "weaviate-cli" appears in the prompt, or when the user wants
-  to interact with a running Weaviate cluster. Trigger if the request:
-  mentions weaviate-cli explicitly; asks to create, query, update, or delete
-  collections, tenants, or data in Weaviate; needs to manage RBAC roles and
-  users; wants to run, restore, or cancel backups; asks about cluster health,
-  node status, or shards; needs to manage replication or aliases; wants to
-  benchmark a Weaviate cluster; or is testing/verifying Weaviate functionality
-  from the command line (even if the primary task is testing code changes).
-  Do NOT use for developing or modifying the weaviate-cli source code — use
-  contributing-to-weaviate-cli for that.
+  Operates Weaviate clusters through the agent-first weaviate-cli tool for
+  cluster lifecycle (local Docker and Weaviate Cloud), DDL, and operational
+  administration. Use this skill whenever "weaviate-cli" appears in the prompt,
+  or when the user wants to start/stop a local Weaviate Docker cluster,
+  provision or inspect Weaviate Cloud clusters, inspect cluster status or
+  configuration, generate native /v1/mcp client config, create/update/delete
+  collections, tenants, or aliases, manage RBAC roles and dynamic users, run or
+  restore backups/exports, or manage nodes, shards, and replication.
+  Do NOT use for querying or bulk-ingesting object data (route those to
+  Weaviate's native /v1/mcp server or a Weaviate SDK) or for modifying the
+  weaviate-cli source code (use contributing-to-weaviate-cli for that).
 ---
 
 # Operating weaviate-cli
 
-Manage Weaviate vector databases through the `weaviate-cli` command-line tool.
+Agent-first CLI for Weaviate cluster lifecycle management, DDL, and operational administration.
 
-## Prerequisites
+## Four-Surface Routing
 
-Install the CLI:
-```bash
-pip install weaviate-cli
-# or
-brew install weaviate/tap/weaviate-cli
-```
+Choose the right surface before running commands:
 
-Verify connectivity:
-```bash
-weaviate-cli get nodes --minimal --json
-```
+| Task | Use | Why |
+|------|-----|-----|
+| Local Docker cluster lifecycle, Weaviate Cloud provisioning (`wcloud`), cluster `status`, `config show`, `mcp config`, DDL (`collection`, `tenant`, `alias`), and operational admin (`node`, `shard`, `replication`, `backup`, `export`, `role`, `user`) | **`weaviate-cli`** | Zero prompt-token overhead, deterministic JSON envelopes, semantic exit codes, and operations native MCP cannot perform |
+| Live schema/tenant reads, hybrid search, and RBAC-scoped object upserts inside a coding/web agent | **Native Weaviate MCP (`/v1/mcp`)** | Built into Weaviate v1.37.1+; configure with `weaviate-cli mcp config --client <client>` |
+| Persistent app code, ETL/batch data ingestion pipelines, code-managed schemas | **Weaviate SDKs** (Python/TS/Go/Java) | Typed application logic and high-throughput streaming |
 
-## Configuration
+## Live Discovery (Prefer Over Memorizing Flags)
 
-The CLI reads configuration from `~/.config/weaviate/config.json` by default. Use `--config-file <path>` to override.
-
-**Local development (no config needed):** The CLI defaults to `localhost:8080` (HTTP) and `localhost:50051` (gRPC). No config file is required for local clusters.
-
-**When authentication is needed**, create a config file under `~/.config/weaviate/` with a descriptive filename:
+`weaviate-cli` is self-documenting and drift-free:
 
 ```bash
-# API key auth
-cat > ~/.config/weaviate/cloud-staging.json << 'EOF'
-{
-    "host": "https://your-cluster.weaviate.cloud",
-    "auth": {
-        "type": "api_key",
-        "api_key": "your-api-key"
-    }
-}
-EOF
-weaviate-cli --config-file ~/.config/weaviate/cloud-staging.json get nodes --minimal --json
+weaviate-cli guide                    # Compact Markdown overview + workflows
+weaviate-cli guide <group>            # Detailed flags for one group (e.g. cloud, local, collection)
+weaviate-cli guide --schema [group]   # Machine-readable JSON command/option schema
+weaviate-cli <group> <action> -h      # Per-command help and examples
 ```
+
+## Connection Configuration & Precedence
+
+Connection settings resolve in strict precedence order (highest to lowest):
+
+1. **CLI flags**: `--url`, `--api-key`, `--grpc-url`
+2. **Explicit env file**: `--env-file <path>` (pair-isolated; loads `WEAVIATE_URL`, `WEAVIATE_API_KEY`, `WEAVIATE_GRPC_URL` without mixing ambient env vars)
+3. **Environment variables**: `WEAVIATE_URL`, `WEAVIATE_API_KEY`, `WEAVIATE_GRPC_URL`
+4. **Explicit config file**: `--config-file <path>` (plus `--user <name>` when `auth.type` is `"user"`)
+5. **Default config file**: `~/.config/weaviate/config.json`
+6. **Fallback**: `http://localhost:8080` (gRPC `50051`)
+
+Verify target resolution (offline, redacted) and live cluster health before mutating:
 
 ```bash
-# RBAC / per-user auth (requires --user flag on every command)
-cat > ~/.config/weaviate/local-rbac.json << 'EOF'
-{
-    "host": "localhost",
-    "http_port": "8080",
-    "grpc_port": "50051",
-    "auth": {
-        "type": "user",
-        "admin-user": "admin-key",
-        "readonly-user": "readonly-key"
-    }
-}
-EOF
-weaviate-cli --config-file ~/.config/weaviate/local-rbac.json --user admin-user get nodes --minimal --json
+weaviate-cli [--env-file .env] config show
+weaviate-cli [--env-file .env] status
 ```
+
+**Config hygiene rules:**
+- Never overwrite `~/.config/weaviate/config.json` without explicit user consent.
+- Never silently assume `.env` is auto-loaded — always pass `--env-file <path>` explicitly or export `WEAVIATE_URL`/`WEAVIATE_API_KEY`.
+- Store credential files in durable, gitignored locations (`.env`, `.env.<name>` added to `.gitignore`, or `~/.config/weaviate/<name>.json`) with mode `0600` — never inside disposable directories like `.venv/`.
+
+## Output, Streams, and Exit Codes
+
+- **Auto-JSON**: When `stdout` is not a TTY (e.g., agent tool shells or pipes), every command automatically emits a JSON envelope:
+  ```json
+  {
+    "data": { "...": "..." },
+    "error": null,
+    "metadata": { "command": "status", "exit_code": 0 }
+  }
+  ```
+  Override explicitly with `--json` or `--no-json`.
+- **Stream separation**: Command output goes strictly to `stdout`; warnings, pull notices, and text-mode errors go to `stderr`.
+- **Semantic exit codes**:
+  - `0`: Success
+  - `1`: Runtime / server error
+  - `2`: Usage / validation / missing `--yes` confirmation error
+  - `3`: Authentication / RBAC / `wcloud` login required
+  - `4`: Resource not found or conflict
+  - `5`: Connectivity / Docker / `wcloud` / `/v1/mcp` unavailable
+- **Destructive confirmation**: Bulk or irreversible commands require `--yes` (e.g., `local destroy --yes`, `collection delete --all --yes`, `role delete <name> --yes`, `user delete <name> --yes`, `backup restore <id> --yes`, `replication delete --all --yes`, `shard update --all --yes`).
+
+## Command Groups
+
+| Group / Command | Actions | Purpose |
+|-----------------|---------|---------|
+| `status` | *(top-level)* | Live readiness, version, RBAC identity, collections/nodes summary, enabled vectorizers/modules, `/v1/mcp` probe |
+| `guide` | *(top-level)* | Compact Markdown guide or `--schema` JSON command tree |
+| `config` | `show` | Offline inspection of resolved target URL, gRPC endpoint, precedence source, and redacted auth |
+| `mcp` | `config` | Generate Streamable HTTP `/v1/mcp` config (`generic`, `claude-code`, `cursor`, `vscode`) with optional `--check` |
+| `local` | `start`, `template`, `stop`, `status`, `logs`, `destroy` | Managed local Docker Compose cluster (`weaviate-cli-local`) |
+| `cloud` | `install-wcloud`, `login`, `whoami`, `logout`, `regions`, `create`, `list`, `get`, `status` | Weaviate Cloud lifecycle delegated to `wcloud` |
+| `collection` | `create`, `list`, `get`, `update`, `delete` | Declarative JSON collection DDL and config updates |
+| `tenant` | `create`, `list`, `get`, `update`, `delete` | Multi-tenant lifecycle (`hot`/`active`, `cold`/`inactive`, `frozen`/`offloaded`) |
+| `alias` | `create`, `list`, `get`, `update`, `delete` | Zero-downtime collection alias management |
+| `node` | `list` | Cluster node health, versions, shards, and collections |
+| `shard` | `list`, `update`, `state` | Shard health, status transitions (`READY`/`READONLY`), and sharding state |
+| `replication` | `create`, `list`, `get`, `cancel`, `delete` | Cross-node shard `COPY`/`MOVE` replication operations |
+| `backup` | `create`, `get`, `restore`, `cancel` | Cluster/collection backup and restore (`s3`, `gcs`, `filesystem`) |
+| `export` | `create`, `get`, `cancel` | Collection Parquet export (`filesystem`, `s3`, `gcs`, `azure`) |
+| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission` | RBAC role and permission administration |
+| `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management and API key rotation |
+
+## Core Workflows
+
+### 1. Local Docker Cluster -> Collection -> Native MCP
 
 ```bash
-# Custom host with separate gRPC endpoint
-cat > ~/.config/weaviate/custom-host.json << 'EOF'
-{
-    "host": "https://custom-host.example.com",
-    "grpc_host": "https://custom-grpc.example.com",
-    "http_port": 443,
-    "grpc_port": 443,
-    "auth": {
-        "type": "api_key",
-        "api_key": "your-api-key"
-    }
-}
-EOF
+# Easy mode: Weaviate :latest + /v1/mcp + local snowflake-arctic-embed-m-v1.5 ONNX sidecar
+weaviate-cli local start
+weaviate-cli local status                  # Includes data.config (auth/RBAC/DB-users/MCP/modules)
+weaviate-cli local status --show-env       # Redacted container environment variables
+
+# Advanced mode (e.g., enabling API key auth, RBAC, and DB users):
+weaviate-cli local template > docker-compose.yml
+# Uncomment AUTHENTICATION_APIKEY_ENABLED, AUTHENTICATION_DB_USERS_ENABLED, AUTHORIZATION_RBAC_ENABLED
+weaviate-cli local start --compose-file docker-compose.yml
+
+# Declarative collection DDL (JSON-only /v1/schema; uses "class", never "name")
+weaviate-cli collection create --template > schema.json
+weaviate-cli collection create --from-file schema.json --dry-run --check-cluster
+weaviate-cli collection create --from-file schema.json --if-not-exists
+
+# Wire up native /v1/mcp for data upsert & hybrid search
+weaviate-cli mcp config --client claude-code --check
 ```
 
-### Config management rules
+- Use `weaviate-cli local start --vectorizer none` for fast admin/CI runs without downloading the ONNX vectorizer image.
+- `local` only manages containers labeled `com.docker.compose.project=weaviate-cli-local` and never touches external Docker containers.
 
-- **Never overwrite** `~/.config/weaviate/config.json` without explicit user consent.
-- When creating configs for the agent, use descriptive filenames (e.g., `local-rbac.json`, `cloud-prod.json`).
-- If the user's prompt specifies a config file, use it. Otherwise, assume local defaults (no `--config-file`).
-- Always verify connectivity after creating or switching configs: `weaviate-cli [--config-file ...] get nodes --minimal --json`
-
-## Command Syntax
-
-```
-weaviate-cli [--config-file FILE] [--user USER] <group> <command> [--json] [options]
-```
-
-### Global Options
-
-| Option | Description |
-|--------|-------------|
-| `--config-file <path>` | Path to config JSON file (overrides default) |
-| `--user <name>` | User for RBAC-enabled clusters (required when auth type is `user`) |
-| `--version` | Print CLI version |
-| `--json` | Output in JSON format (use on every command for agent-friendly output) |
-
-### Command Groups
-
-| Group | Description |
-|-------|-------------|
-| `create` | Create collections, tenants, data, backups, exports, roles, users, aliases, replications |
-| `get` | Inspect collections, tenants, shards, backups, exports, roles, users, nodes, aliases, replications |
-| `update` | Update collections, tenants, shards, data, users, aliases |
-| `delete` | Delete collections, tenants, data, roles, users, aliases, replications |
-| `query` | Query data (fetch/vector/keyword/hybrid/uuid), replications, sharding state |
-| `restore` | Restore backups |
-| `cancel` | Cancel backups, exports, and replications |
-| `assign` | Assign roles to users, permissions to roles |
-| `revoke` | Revoke roles from users, permissions from roles |
-| `benchmark` | Run QPS benchmarks |
-
-## Command Reference
-
-**Always use `--json` for programmatic consumption.**
-
-### Collections
+### 2. Weaviate Cloud Provisioning (via `wcloud`)
 
 ```bash
-weaviate-cli create collection --collection MyCollection --replication_factor 3 --vector_index hnsw --vectorizer none --json
-weaviate-cli get collection --json                          # List all
-weaviate-cli get collection --collection MyCollection --json # Specific
-weaviate-cli update collection --collection MyCollection --description "Updated" --replication_factor 5 --json
-weaviate-cli delete collection --collection MyCollection --json
-weaviate-cli delete collection --all --json
+# Pre-check auth first — 'cloud login' uses browser OAuth loopback and fails fast in non-TTY
+weaviate-cli cloud whoami
+
+# Provision a cluster and capture the ONE-TIME admin API key into a durable gitignored file
+weaviate-cli cloud create --name my-cluster --region eu-central-1 --wait --write-env .env.cloud
+# Ensure .env.cloud is in .gitignore, then verify:
+weaviate-cli --env-file .env.cloud status
+weaviate-cli --env-file .env.cloud mcp config --client claude-code --check
 ```
 
-Key create options: `--multitenant`, `--auto_tenant_creation`, `--auto_tenant_activation`, `--shards N`, `--vectorizer <type>`, `--named_vector`, `--replication_deletion_strategy`, `--async_replication_config key=value` (repeatable; requires `--async_enabled` and Weaviate >= v1.36.0), `--object_ttl_type`, `--object_ttl_time`, `--object_ttl_filter_expired`, `--object_ttl_property_name` (only when `object_ttl_type=property`)
+**Critical Cloud rules:**
+- **One-time admin API key**: Weaviate Cloud returns the cluster admin API key **only once** (on `cloud create --wait` or the first `cloud get <id>` after `READY`). Before either key-bearing call, choose `--write-env`, `--write-config`, or `--include-key` for a protected stdout consumer. Use `cloud status <id>` to poll. A populated destination blocks the call; an ambient `WEAVIATE_API_KEY` used for authentication does not. File saves do not print the key on success unless `--include-key` is also set.
+- **`CREDENTIAL_SAVE_FAILED` (exit 1)**: The cluster exists. Do not retry provisioning. Check `data.credentials_saved_to` for successful writes and `data.credential_save_failures` for failed paths. If no write succeeded, save the one-time key from stdout before discarding it. Treat this output as a secret, not a CI log.
+- **`wcloud` installation**: Resolved `WEAVIATE_WCLOUD_PATH` > `$PATH` > `~/.cache/weaviate-cli/bin/wcloud`. Never silently downloaded in non-TTY; use `weaviate-cli cloud install-wcloud` (SHA-256 verified) or ask the user to install `wcloud`.
 
-Mutable fields: `--async_enabled`, `--replication_factor`, `--vector_index`, `--description`, `--training_limit`, `--auto_tenant_creation`, `--auto_tenant_activation`, `--replication_deletion_strategy`, `--async_replication_config key=value` (repeatable), `--object_ttl_type`, `--object_ttl_time`, `--object_ttl_filter_expired`, `--object_ttl_property_name` (only when `object_ttl_type=property`)
-
-#### Async Replication Config
+### 3. Collections, Tenants, and Aliases
 
 ```bash
-# Create with async replication tuning (requires --async_enabled and Weaviate >= v1.36.0)
-weaviate-cli create collection --collection MyCol --async_enabled \
-  --async_replication_config frequency=60 \
-  --async_replication_config hashtree_height=16 \
-  --async_replication_config propagation_concurrency=4 --json
+weaviate-cli collection list
+weaviate-cli collection get Articles
+weaviate-cli collection update Articles --description "Knowledge base"
+weaviate-cli collection delete Articles
 
-# Update async replication config on existing collection
-weaviate-cli update collection --collection MyCol \
-  --async_replication_config propagation_delay=30 \
-  --async_replication_config propagation_batch_size=100 --json
+# Tenants require explicit names (states: hot/active, cold/inactive, frozen/offloaded)
+weaviate-cli tenant create tenant-a tenant-b --collection Articles --state active
+weaviate-cli tenant list --collection Articles
+weaviate-cli tenant update tenant-b --collection Articles --state frozen
+weaviate-cli tenant delete tenant-b --collection Articles
+
+# Zero-downtime alias switch
+weaviate-cli alias create Docs Articles_v1
+weaviate-cli alias update Docs Articles_v2
+weaviate-cli alias list
+weaviate-cli alias delete Docs
 ```
 
-Valid keys (all integers): `max_workers`, `hashtree_height`, `frequency`, `frequency_while_propagating`, `alive_nodes_checking_frequency`, `logging_frequency`, `diff_batch_size`, `diff_per_node_timeout`, `pre_propagation_timeout`, `propagation_timeout`, `propagation_limit`, `propagation_delay`, `propagation_concurrency`, `propagation_batch_size`
-
-Deprecated (removed from the server schema in Weaviate v1.37.3 and silently ignored from that version on, but still accepted for older servers): `max_workers`, `alive_nodes_checking_frequency`.
-
-#### Object TTL
+### 4. RBAC Roles & Dynamic DB Users
 
 ```bash
-# Create with timestamp-based TTL (requires inverted_index timestamp for existing collections)
-weaviate-cli create collection --collection MyTTL --inverted_index timestamp --object_ttl_type create --object_ttl_time 3600 --json
-
-# Create with property-based TTL (date property, time=0 means expire at exact property date)
-weaviate-cli create collection --collection MyTTL --object_ttl_type property --object_ttl_time 0 --object_ttl_property_name expiresAt --json
-
-# Enable TTL on existing collection
-weaviate-cli update collection --collection MyTTL --object_ttl_type create --object_ttl_time 3600 --object_ttl_filter_expired true --json
-
-# Disable TTL (use "disable", not "disabled")
-weaviate-cli update collection --collection MyTTL --object_ttl_type disable --json
+# Quote permissions with wildcards so zsh/bash does not glob them
+weaviate-cli role create ArticlesReader -p 'read_collections:Articles' -p 'read_data:Articles'
+weaviate-cli user create app-reader --store
+weaviate-cli role assign --role ArticlesReader --user app-reader
+weaviate-cli role get ArticlesReader
+weaviate-cli user get app-reader
+# Route stdout to a secret manager when rotating a key already present in the config.
+# --store refuses to overwrite it, even on rotation.
+# weaviate-cli user update app-reader --rotate-api-key --include-key | <secret consumer>
+weaviate-cli user delete app-reader --yes
+weaviate-cli role delete ArticlesReader --yes
 ```
 
-TTL types: `create` (by `_creationTimeUnix`), `update` (by `_lastUpdateTimeUnix`), `property` (by custom date property), `disable`
+`--store` needs an `auth.type=user` config with an unused slot for the requested user. If a save fails after creation or rotation, save the new key from stdout. Do not repeat the operation. After an interrupted file save, inspect the private `.<filename>.weaviate-key-lock` directory for `original` and `pending` before removing it; either may contain credentials.
 
-**Note**: `--object_ttl_time` is in seconds. Value of `0` is valid for property type (expire at exact date). Timestamp types (`create`/`update`) require a minimum of 60 seconds.
+**Prerequisite**: Dynamic user CRUD (`user create/update/delete`) requires `AUTHENTICATION_DB_USERS_ENABLED=true` on the Weaviate server (check `local status` -> `data.config.db_users` for local clusters).
 
-See [references/collections.md](references/collections.md) for full options.
-
-### Data
+### 5. Cluster Ops, Backups, Exports, and Replication
 
 ```bash
-weaviate-cli create data --collection Movies --limit 1000 --randomize --json
-weaviate-cli query data --collection Movies --search_type hybrid --query "Action movie" --limit 10 --json
-weaviate-cli update data --collection Movies --limit 100 --randomize --json
-weaviate-cli delete data --collection Movies --limit 100 --json
-weaviate-cli delete data --collection Movies --uuid "abc-123" --json
+weaviate-cli node list --minimal
+weaviate-cli shard list --collection Articles
+weaviate-cli shard state Articles
+weaviate-cli shard update --collection Articles --status READY
+
+weaviate-cli replication create --collection Articles --shard shard-1 --source-node node1 --target-node node2 --type COPY
+weaviate-cli replication list --collection Articles
+weaviate-cli replication get <UUID> --history
+weaviate-cli replication cancel <UUID>
+weaviate-cli replication delete <UUID>
+
+weaviate-cli backup create bk-2026 --backend s3 --include "Articles" --wait
+weaviate-cli backup get bk-2026 --backend s3
+weaviate-cli backup restore bk-2026 --backend s3 --wait --yes
+weaviate-cli backup cancel bk-2026 --backend s3
+
+weaviate-cli export create exp-2026 --backend s3 --include "Articles" --wait
+weaviate-cli export get exp-2026 --backend s3
+weaviate-cli export cancel exp-2026 --backend s3
 ```
-
-Search types: `fetch`, `vector` (near_text), `keyword` (bm25), `hybrid`, `uuid`
-
-Key data options: `--consistency_level`, `--auto_tenants N`, `--tenants "T1,T2"`, `--vector_dimensions`, `--batch_size`, `--concurrent_requests`, `--wait_for_indexing`, `--dynamic_batch`, `--multi_vector`
-
-Key query options: `--properties "title,keywords"`, `--tenants "T1"`, `--target_vector "default"`, `--consistency_level`
-
-**Note**: `--consistency_level` values must be **lowercase**: `one`, `quorum`, `all` (not `ONE`, `QUORUM`, `ALL`).
-
-**Alias support**: The `--collection` flag accepts collection aliases in all data commands. If the name isn't a direct collection, the CLI checks the alias list automatically.
-
-See [references/data.md](references/data.md) and [references/search.md](references/search.md).
-
-### Tenants
-
-```bash
-weaviate-cli create tenants --collection Movies --number_tenants 100 --tenant_suffix "Tenant" --state active --json
-weaviate-cli create tenants --collection Movies --tenants "Alice,Bob,Charlie" --state active --json
-weaviate-cli get tenants --collection Movies --json
-weaviate-cli get tenants --collection Movies --tenant_id "Tenant-1" --verbose --json
-weaviate-cli update tenants --collection Movies --state cold --number_tenants 100 --json
-weaviate-cli update tenants --collection Movies --state hot --tenants "Tenant-1,Tenant-2" --json
-weaviate-cli delete tenants --collection Movies --number_tenants 100 --json
-weaviate-cli delete tenants --collection Movies --tenants "Tenant-1,Tenant-2" --json
-```
-
-States: `hot`/`active`, `cold`/`inactive`, `frozen`/`offloaded`
-
-See [references/tenants.md](references/tenants.md).
-
-### Backups
-
-```bash
-weaviate-cli create backup --backend s3 --backup_id my-backup --wait --json
-weaviate-cli create backup --backend s3 --backup_id my-backup --include "Movies,Books" --wait --json
-weaviate-cli create backup --backend s3 --backup_id my-incremental --incremental_base_backup_id my-backup --json
-weaviate-cli get backup --backend s3 --backup_id my-backup --json
-weaviate-cli get backup --backend s3 --backup_id my-backup --restore --json
-weaviate-cli restore backup --backend s3 --backup_id my-backup --wait --json
-weaviate-cli cancel backup --backend s3 --backup_id my-backup --json
-```
-
-Backends: `s3`, `gcs`, `filesystem`. Options: `--include`, `--exclude`, `--wait`, `--cpu_for_backup N`, `--override-alias`, `--incremental_base_backup_id`
-
-See [references/backups.md](references/backups.md).
-
-### Collection Export
-
-```bash
-weaviate-cli create export-collection --export_id my-export --backend s3 --file_format parquet --wait --json
-weaviate-cli create export-collection --export_id my-export --backend s3 --include "Movies,Books" --json
-weaviate-cli create export-collection --export_id my-export --backend s3 --exclude "TempData" --json
-weaviate-cli get export-collection --export_id my-export --backend s3 --json
-weaviate-cli cancel export-collection --export_id my-export --backend s3 --json
-```
-
-Backends: `filesystem`, `s3`, `gcs`, `azure`. File formats: `parquet`.
-
-Options: `--include`, `--exclude` (mutually exclusive), `--wait`
-
-**Prerequisite**: The export backend must be configured on the Weaviate cluster (e.g., `COLLECTION_EXPORT=true` in local-k8s, which provisions MinIO and the `weaviate-export` bucket automatically).
-
-See [references/exports.md](references/exports.md).
-
-### RBAC (Roles, Users, Permissions)
-
-```bash
-weaviate-cli create role --role_name MoviesAdmin -p crud_collections:Movies -p crud_data:Movies --json
-weaviate-cli create user --user_name test-user --json
-weaviate-cli create user --user_name test-user --store --json  # Store API key in config
-weaviate-cli assign role --role_name MoviesAdmin --user_name test-user --json
-weaviate-cli assign role --role_name MoviesAdmin --role_name TenantAdmin --user_name test-user --json  # Multiple roles
-weaviate-cli assign permission -p read_data:Movies --role_name MoviesAdmin --json
-weaviate-cli get role --all --json
-weaviate-cli get role --role_name MoviesAdmin --json
-weaviate-cli get role --user_name test-user --json
-weaviate-cli get user --all --json
-weaviate-cli get user --user_name test-user --json
-weaviate-cli get user --role_name MoviesAdmin --json
-weaviate-cli update user --user_name test-user --rotate_api_key --json
-weaviate-cli update user --user_name test-user --activate --json
-weaviate-cli update user --user_name test-user --deactivate --json
-weaviate-cli revoke role --role_name MoviesAdmin --user_name test-user --json
-weaviate-cli revoke role --role_name MoviesAdmin --user_name oidc-user --user_type oidc --json  # OIDC user
-weaviate-cli revoke permission -p read_data:Movies --role_name MoviesAdmin --json
-weaviate-cli delete role --role_name MoviesAdmin --json
-weaviate-cli delete user --user_name test-user --json
-```
-
-Permission format: `action:target`. See [references/rbac.md](references/rbac.md) for full permission reference.
-
-**Shell quoting**: Permissions with wildcards must be quoted to prevent shell globbing: `-p 'crud_data:*'` (not `-p crud_data:*`, which fails in zsh with `no matches found`).
-
-### Cluster & Nodes
-
-```bash
-weaviate-cli get nodes --json                          # Default view
-weaviate-cli get nodes --minimal --json                # Minimal (fast for large clusters)
-weaviate-cli get nodes --shards --json                 # Per-shard details
-weaviate-cli get nodes --collections --json            # Per-collection details
-weaviate-cli get nodes --collection Movies --json      # Specific collection
-weaviate-cli get shards --json                         # All collections
-weaviate-cli get shards --collection Movies --json     # Specific collection
-weaviate-cli update shards --collection Movies --status READY --json
-weaviate-cli update shards --all --status READY --json
-weaviate-cli query sharding-state Movies --json
-```
-
-### Replication
-
-```bash
-weaviate-cli create replication --collection Movies --shard shard-1 --source-node node-1 --target-node node-2 --type COPY --json
-weaviate-cli get replication <UUID> --json
-weaviate-cli get replication <UUID> --history --json
-weaviate-cli get all-replications --json
-weaviate-cli query replications --collection Movies --json
-weaviate-cli query replications --collection Movies --shard shard-1 --json
-weaviate-cli query replications --target-node node-2 --json
-weaviate-cli query replications --collection Movies --history --json  # Include history
-weaviate-cli cancel replication <UUID> --json
-weaviate-cli delete replication <UUID> --json
-weaviate-cli delete all-replications --json
-```
-
-Types: `COPY` (duplicate shard), `MOVE` (migrate shard)
-
-See [references/cluster.md](references/cluster.md).
-
-### Aliases
-
-```bash
-weaviate-cli create alias MyAlias Movies --json
-weaviate-cli get alias --alias_name MyAlias --json
-weaviate-cli get alias --collection Movies --json
-weaviate-cli get alias --all --json
-weaviate-cli update alias MyAlias Movies_v2 --json
-weaviate-cli delete alias MyAlias --json
-```
-
-### Benchmark
-
-```bash
-weaviate-cli benchmark qps --collection Movies --query-type hybrid --max-duration 300 --json
-weaviate-cli benchmark qps --collection Movies --qps 100 --json              # Fixed QPS
-weaviate-cli benchmark qps --collection Movies --tenant "Tenant-0" --json    # Multi-tenant
-weaviate-cli benchmark qps --collection Movies --output csv --generate-graph --file-alias staging --json
-```
-
-Key options: `--query-type` (hybrid/bm25/near_text), `--qps N`, `--max-duration`, `--test-duration`, `--warmup-duration`, `--limit`, `--consistency-level`, `--latency-threshold`, `--concurrency`, `--query-terms`
-
-See [references/benchmark.md](references/benchmark.md).
-
-## Workflow Dependencies
-
-### Collection Lifecycle
-1. `create collection` -- must exist before any operations on it
-2. `create tenants` -- only if collection has `--multitenant` (or use `--auto_tenant_creation`)
-3. `create data` -- collection must exist; for MT collections, tenants must exist or auto-creation enabled
-4. `query data` -- collection must have data
-5. `delete data` -> `delete tenants` -> `delete collection` (reverse order)
-
-### Multi-Tenancy State Machine
-```
-hot/active  <-->  cold/inactive
-    ^   \              ^
-    |    \             |
-    v     v            v
-      frozen/offloaded
-```
-- `hot`/`active`: data in memory, queryable, accepts writes
-- `cold`/`inactive`: data on disk, not queryable
-- `frozen`/`offloaded`: data in cloud storage, not queryable
-- Tenants can be offloaded directly from `hot`/`active` or from `cold`/`inactive`
-- Data operations require tenants in `hot`/`active` state
-
-### RBAC Workflow
-1. `create role --role_name X -p '<permission>'` -- create role with permissions (quote wildcards!)
-2. `create user --user_name Y --store` -- create user and auto-save API key into active config
-3. `assign role --role_name X --user_name Y` -- assign role to user
-4. Verify: `get role --role_name X` and `get user --user_name Y`
-5. Test as new user: `weaviate-cli --config-file <config> --user Y <command> --json`
-6. Cleanup: `revoke role` -> `delete role` / `delete user`
-
-**Prerequisite**: The Weaviate cluster must be deployed with `DYNAMIC_USERS=true` for `create user` to work. Without it, only static API key users (configured at deploy time) are available.
-
-### Backup Workflow
-1. `create backup --backend s3 --backup_id my-backup --wait` -- wait for completion
-2. `get backup --backend s3 --backup_id my-backup` -- check status
-3. `restore backup --backend s3 --backup_id my-backup --wait` -- restore
-4. `cancel backup` -- cancel in-progress backup
-
-### Replication Workflow
-1. `get nodes` -- identify source and target nodes
-2. `get shards --collection X` -- identify shard to replicate
-3. `create replication --collection X --shard S --source-node A --target-node B --type COPY`
-4. `get replication <UUID>` -- monitor progress
-5. `cancel replication <UUID>` -- cancel if needed
-6. `delete replication <UUID>` -- cleanup completed operation
-
-### Object TTL Workflow
-1. `create collection --object_ttl_type create --object_ttl_time 3600` -- create with TTL (or `update collection` to enable later)
-2. TTL requires server-side `objects_ttl_delete_schedule` runtime config to be set (e.g., `@every 10s`)
-3. `get collection --collection X` -- verify `objectTtlConfig` in response
-4. `update collection --object_ttl_type disable` -- disable TTL (stops background deletion)
-5. For timestamp-based TTL on existing collections: `--inverted_index timestamp` must be set at creation or already enabled
-6. For property-based TTL: the date property must exist, be `date` type, and have filterable or rangeable index
-
-### Collection Export Workflow
-1. `create export-collection --backend s3 --export_id my-export --wait` -- create and wait for completion
-2. `get export-collection --backend s3 --export_id my-export` -- check status (includes shard-level progress)
-3. `cancel export-collection --backend s3 --export_id my-export` -- cancel in-progress export
-
-**Prerequisite**: The export backend must be configured on the cluster. For local-k8s, deploy with `COLLECTION_EXPORT=true`, which provisions MinIO, creates the `weaviate-export` bucket, and wires `EXPORT_DEFAULT_BUCKET` automatically.
-
-### Alias Workflow
-1. `create collection --collection Movies_v1` -- create the target collection
-2. `create alias Movies Movies_v1` -- create alias pointing to collection
-3. `update alias Movies Movies_v2` -- repoint alias to new collection
-4. `get alias --alias_name Movies` -- inspect alias
-5. `delete alias Movies` -- remove alias
-
-## JSON Output
-
-All commands support `--json` for machine-readable output. Always use `--json` when invoking commands programmatically.
-
-**Success responses** return structured data or:
-```json
-{"status": "success", "message": "..."}
-```
-
-**Error responses** are printed to stderr and the process exits with code 1:
-```
-Error: <description>
-```
-
-## Error Handling
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Config file does not exist` | Missing config | Create config or use `--config-file` |
-| `User must be specified when auth type is 'user'` | Missing `--user` flag | Add `--user <name>` |
-| `User 'X' not found in config file` | User not in config auth section | Add user to config or check spelling |
-| `GRPC connection seems to be unavailable` | gRPC port blocked | Check firewall/network; CLI retries skipping checks |
-| `Error: Collection 'X' does not exist` | Collection not created yet | Run `create collection` first |
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `SLOW_CONNECTION` | Set to `1`/`true` to double all client timeouts |
-| `HOME` | Used to locate default config at `~/.config/weaviate/config.json` |
-
-## Maintaining This Skill
-
-When new commands or options are added to `weaviate-cli`:
-1. Update the **Command Reference** section above with the new command syntax
-2. Update or create the relevant reference file in `references/`
-3. If a new command group is added, update the **Command Groups** table
-4. Ensure all examples include `--json`
-5. Update workflow dependency sections if the new command introduces dependencies
-
-## References
-
-- [references/collections.md](references/collections.md) -- Full collection options and notes
-- [references/data.md](references/data.md) -- Data ingestion options and notes
-- [references/search.md](references/search.md) -- Search types, options, and selection guide
-- [references/tenants.md](references/tenants.md) -- Tenant state machine and management
-- [references/backups.md](references/backups.md) -- Backup/restore options and notes
-- [references/exports.md](references/exports.md) -- Collection export options and notes
-- [references/rbac.md](references/rbac.md) -- Permission format, actions, and examples
-- [references/cluster.md](references/cluster.md) -- Nodes, shards, replication operations
-- [references/benchmark.md](references/benchmark.md) -- Benchmark options and output modes
-- [references/config-management.md](references/config-management.md) -- Config patterns and decision tree
+| `WEAVIATE_URL` | Weaviate REST endpoint URL |
+| `WEAVIATE_API_KEY` | Weaviate Bearer API key |
+| `WEAVIATE_GRPC_URL` | Optional explicit Weaviate gRPC endpoint. When overriding the REST target, supply the matching gRPC override at the same or higher precedence; otherwise the CLI derives the endpoint from the new target. |
+| `WEAVIATE_WCLOUD_PATH` | Optional explicit path override for the `wcloud` binary |
+| `SLOW_CONNECTION` | Set to `1`/`true` to double Weaviate client timeouts |
+| `HOME` | Base directory for `~/.config/weaviate/config.json` and `~/.cache/weaviate-cli/` |

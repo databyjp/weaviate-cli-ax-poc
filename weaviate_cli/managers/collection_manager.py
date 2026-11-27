@@ -1,699 +1,250 @@
-import click
-import json
-from typing import Dict, List, Optional
+"""Collection adapter translating CLI operations onto weaviate.WeaviateClient.
+
+This module performs no stdout/stderr printing and renders no tables; it returns
+structured Python dictionaries and raises typed CLIError or Weaviate SDK exceptions.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import weaviate.classes.config as wvc
 from weaviate.client import WeaviateClient
 from weaviate.collections import Collection
 from weaviate.collections.classes.config import _CollectionConfigSimple
-from weaviate.collections.classes.tenants import TenantActivityStatus
 from weaviate.collections.classes.config_vector_index import VectorFilterStrategy
-from weaviate_cli.defaults import (
-    CreateCollectionDefaults,
-    UpdateCollectionDefaults,
-    DeleteCollectionDefaults,
-    GetCollectionDefaults,
-)
+from weaviate.collections.classes.tenants import TenantActivityStatus
+
+from weaviate_cli.defaults import UpdateCollectionDefaults
+from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.utils import (
-    print_json_or_text,
+    ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS,
+    ASYNC_REPLICATION_CONFIG_REMOVED_VERSION,
     older_than_version,
-    warn_removed_async_replication_keys,
 )
-import weaviate.classes.config as wvc
-from prettytable import PrettyTable
+
+
+def _enum_str(value: object) -> str:
+    return str(getattr(value, "value", value))
 
 
 class CollectionManager:
+    """Adapter for collection DDL and operational config updates."""
+
     def __init__(self, client: WeaviateClient) -> None:
         self.client = client
 
-    def __get_total_objects_with_multitenant(self, col_obj: Collection) -> int:
-        acc = 0
-        for tenant_name, tenant in col_obj.tenants.get().items():
-            acc += (
-                len(col_obj.with_tenant(tenant))
-                if tenant.activity_status == TenantActivityStatus.ACTIVE
-                else 0
-            )
-        return acc
-
-    def get_collection(
-        self,
-        collection: Optional[str] = GetCollectionDefaults.collection,
-        json_output: bool = False,
-    ) -> None:
-
-        if collection is not None:
-            if not self.client.collections.exists(collection):
-
-                raise Exception(f"Collection '{collection}' does not exist")
-            col_obj: Collection = self.client.collections.get(collection)
-            # Pretty print the dict structure
-            click.echo(json.dumps(col_obj.config.get().to_dict(), indent=4))
-        else:
-            collections = self.client.collections.list_all()
-
-            if not collections:
-                if json_output:
-                    click.echo(json.dumps({"collections": [], "total": 0}, indent=2))
-                else:
-                    click.echo("No collections found")
-                return
-
-            rows = []
-            for col_name in collections:
-                col_obj = self.client.collections.get(col_name)
-                schema = col_obj.config.get()
-                vectorizer = "None"
-                vector_index_type = "None"
-                named_vectors = "False"
-                if schema.vector_config and not schema.vectorizer:
-                    named_vectors = "True"
-                    vectorizer = schema.vector_config[
-                        list(schema.vector_config.keys())[0]
-                    ].vectorizer.vectorizer.value
-                    if not schema.vector_index_type:
-                        vector_index_type = schema.vector_config[
-                            list(schema.vector_config.keys())[0]
-                        ].vector_index_config.vector_index_type()
-                    else:
-                        vector_index_type = schema.vector_index_type
-                else:
-                    vectorizer = (
-                        schema.vectorizer.value if schema.vectorizer else "None"
-                    )
-                    vector_index_type = (
-                        schema.vector_index_type.value
-                        if schema.vector_index_type
-                        else "None"
-                    )
-
-                tenant_count = (
-                    len(col_obj.tenants.get())
-                    if schema.multi_tenancy_config.enabled
-                    else 0
-                )
-                object_count = (
-                    self.__get_total_objects_with_multitenant(col_obj)
-                    if schema.multi_tenancy_config.enabled
-                    else len(col_obj)
-                )
-
-                rows.append(
-                    {
-                        "name": col_name,
-                        "multitenancy": schema.multi_tenancy_config.enabled,
-                        "tenant_count": tenant_count,
-                        "object_count": object_count,
-                        "replication_factor": schema.replication_config.factor,
-                        "vector_index": (
-                            str(vector_index_type) if vector_index_type else "None"
-                        ),
-                        "named_vectors": named_vectors == "True",
-                        "vectorizer": vectorizer if vectorizer else "None",
-                    }
-                )
-
-            def _print_text():
-                table = PrettyTable()
-                table.field_names = [
-                    "Collection",
-                    "Multitenancy",
-                    "Tenants",
-                    "Objects",
-                    "Repl. Factor",
-                    "Vector Index",
-                    "Named Vectors",
-                    "Vectorizer",
-                ]
-                table.align = "l"
-                for row in rows:
-                    table.add_row(
-                        [
-                            row["name"],
-                            "True" if row["multitenancy"] else "False",
-                            row["tenant_count"],
-                            row["object_count"],
-                            row["replication_factor"],
-                            row["vector_index"],
-                            "True" if row["named_vectors"] else "False",
-                            row["vectorizer"],
-                        ]
-                    )
-                print("\nCollections:")
-                print(table)
-                print(f"\nTotal: {len(collections)} collections")
-
-            print_json_or_text(
-                {"collections": rows, "total": len(rows)},
-                json_output,
-                _print_text,
-            )
+    def _get_total_objects_with_multitenant(self, col_obj: Collection) -> int:
+        total = 0
+        for tenant in col_obj.tenants.get().values():
+            if tenant.activity_status == TenantActivityStatus.ACTIVE:
+                total += len(col_obj.with_tenant(tenant))
+        return total
 
     def get_all_collections(self) -> dict[str, _CollectionConfigSimple]:
         return self.client.collections.list_all()
 
-    _DISTANCE_METRIC_MAP = {
-        "cosine": wvc.VectorDistances.COSINE,
-        "dot": wvc.VectorDistances.DOT,
-        "l2-squared": wvc.VectorDistances.L2_SQUARED,
-        "hamming": wvc.VectorDistances.HAMMING,
-        "manhattan": wvc.VectorDistances.MANHATTAN,
-    }
-
-    def _resolve_distance_metric(
-        self, distance_metric: Optional[str]
-    ) -> Optional[wvc.VectorDistances]:
-        """Convert a distance metric string to its VectorDistances enum value."""
-        if distance_metric is None:
+    def get_available_modules(self) -> list[str] | None:
+        """Return enabled module names from /v1/meta, or None if unavailable."""
+        meta = self.client.get_meta()
+        if not isinstance(meta, dict):
             return None
-        if distance_metric not in self._DISTANCE_METRIC_MAP:
-            raise ValueError(
-                f"Invalid distance_metric: '{distance_metric}'. "
-                f"Must be one of: {list(self._DISTANCE_METRIC_MAP.keys())}"
+        modules = meta.get("modules")
+        if not isinstance(modules, dict):
+            return None
+        return sorted(str(name) for name in modules)
+
+    def list_collections(self) -> list[dict[str, Any]]:
+        """Return summary metadata rows for all collections in the cluster."""
+        collections = self.client.collections.list_all()
+        if not collections:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for col_name in collections:
+            col_obj = self.client.collections.get(col_name)
+            schema = col_obj.config.get()
+            vectorizer = "None"
+            vector_index_type = "None"
+            named_vectors = False
+
+            if schema.vector_config and not schema.vectorizer:
+                named_vectors = True
+                first_vec = next(iter(schema.vector_config.values()))
+                vectorizer = _enum_str(first_vec.vectorizer.vectorizer)
+                if not schema.vector_index_type:
+                    vector_index_type = _enum_str(
+                        first_vec.vector_index_config.vector_index_type()
+                    )
+                else:
+                    vector_index_type = _enum_str(schema.vector_index_type)
+            else:
+                if schema.vectorizer:
+                    vectorizer = _enum_str(schema.vectorizer)
+                if schema.vector_index_type:
+                    vector_index_type = _enum_str(schema.vector_index_type)
+
+            mt_enabled = bool(schema.multi_tenancy_config.enabled)
+            tenant_count = len(col_obj.tenants.get()) if mt_enabled else 0
+            object_count = (
+                self._get_total_objects_with_multitenant(col_obj)
+                if mt_enabled
+                else len(col_obj)
             )
-        return self._DISTANCE_METRIC_MAP[distance_metric]
 
-    def _build_hfresh_config(
-        self,
-        max_posting_size_kb: Optional[int] = None,
-        distance_metric: Optional[wvc.VectorDistances] = None,
-        rescore_limit: Optional[int] = None,
-        replicas: Optional[int] = None,
-        search_probe: Optional[int] = None,
-    ):
-        """Build hfresh configuration with provided parameters."""
-        kwargs = {}
-
-        if max_posting_size_kb is not None:
-            kwargs["max_posting_size_kb"] = max_posting_size_kb
-        if distance_metric is not None:
-            kwargs["distance_metric"] = distance_metric
-        if replicas is not None:
-            kwargs["replicas"] = replicas
-        if search_probe is not None:
-            kwargs["search_probe"] = search_probe
-        if rescore_limit is not None:
-            kwargs["quantizer"] = wvc.Configure.VectorIndex.Quantizer.rq(
-                bits=8, rescore_limit=rescore_limit
+            rows.append(
+                {
+                    "name": col_name,
+                    "multitenancy": mt_enabled,
+                    "tenant_count": tenant_count,
+                    "object_count": object_count,
+                    "replication_factor": schema.replication_config.factor,
+                    "vector_index": vector_index_type,
+                    "named_vectors": named_vectors,
+                    "vectorizer": vectorizer,
+                }
             )
 
-        return wvc.Configure.VectorIndex.hfresh(**kwargs)
+        return rows
+
+    def get_collection(self, collection: str) -> dict[str, Any]:
+        """Return the native /v1/schema dict for a single collection."""
+        if not self.client.collections.exists(collection):
+            raise CLIError(
+                code="COLLECTION_NOT_FOUND",
+                message=f"Collection '{collection}' does not exist.",
+                exit_code=ExitCode.NOT_FOUND,
+                hint="Run 'weaviate-cli collection list' to see existing collections.",
+            )
+        col_obj: Collection = self.client.collections.get(collection)
+        return col_obj.config.get().to_dict()
 
     def create_collection(
         self,
-        collection: str = CreateCollectionDefaults.collection,
-        replication_factor: int = CreateCollectionDefaults.replication_factor,
-        async_enabled: bool = CreateCollectionDefaults.async_enabled,
-        vector_index: str = CreateCollectionDefaults.vector_index,
-        inverted_index: Optional[str] = CreateCollectionDefaults.inverted_index,
-        training_limit: int = CreateCollectionDefaults.training_limit,
-        multitenant: bool = CreateCollectionDefaults.multitenant,
-        auto_tenant_creation: bool = CreateCollectionDefaults.auto_tenant_creation,
-        auto_tenant_activation: bool = CreateCollectionDefaults.auto_tenant_activation,
-        force_auto_schema: bool = CreateCollectionDefaults.force_auto_schema,
-        shards: int = CreateCollectionDefaults.shards,
-        vectorizer: str = CreateCollectionDefaults.vectorizer,
-        vectorizer_base_url: Optional[
-            str
-        ] = CreateCollectionDefaults.vectorizer_base_url,
-        replication_deletion_strategy: Optional[
-            str
-        ] = CreateCollectionDefaults.replication_deletion_strategy,
-        named_vector: bool = CreateCollectionDefaults.named_vector,
-        named_vector_name: Optional[str] = CreateCollectionDefaults.named_vector_name,
-        hfresh_max_posting_size_kb: Optional[
-            int
-        ] = CreateCollectionDefaults.hfresh_max_posting_size_kb,
-        hfresh_replicas: Optional[int] = CreateCollectionDefaults.hfresh_replicas,
-        hfresh_search_probe: Optional[
-            int
-        ] = CreateCollectionDefaults.hfresh_search_probe,
-        distance_metric: Optional[str] = CreateCollectionDefaults.distance_metric,
-        rescore_limit: Optional[int] = CreateCollectionDefaults.rescore_limit,
-        json_output: bool = False,
-        object_ttl_type: str = CreateCollectionDefaults.object_ttl_type,
-        object_ttl_time: Optional[int] = CreateCollectionDefaults.object_ttl_time,
-        object_ttl_filter_expired: Optional[
-            bool
-        ] = CreateCollectionDefaults.object_ttl_filter_expired,
-        object_ttl_property_name: Optional[
-            str
-        ] = CreateCollectionDefaults.object_ttl_property_name,
-        async_replication_config: Optional[Dict[str, int]] = None,
-    ) -> None:
-
-        if (
-            object_ttl_type != "property"
-            and object_ttl_property_name
-            != CreateCollectionDefaults.object_ttl_property_name
-        ):
-            raise Exception(
-                "object_ttl_property_name is only valid when object_ttl_type is 'property'."
+        spec: dict[str, Any],
+        *,
+        if_not_exists: bool = False,
+    ) -> dict[str, Any]:
+        """Create a collection from a validated /v1/schema dict."""
+        collection = spec.get("class")
+        if not isinstance(collection, str) or not collection.strip():
+            raise CLIError(
+                code="INVALID_COLLECTION_SPEC",
+                message="Collection schema must include a non-empty 'class' name.",
+                exit_code=ExitCode.USAGE,
             )
+
         if self.client.collections.exists(collection):
-
-            raise Exception(
-                f"Error: Collection '{collection}' already exists in Weaviate. Delete using <delete collection> command."
+            if if_not_exists:
+                return {
+                    "collection": collection,
+                    "created": False,
+                    "already_exists": True,
+                }
+            raise CLIError(
+                code="COLLECTION_EXISTS",
+                message=f"Collection '{collection}' already exists.",
+                exit_code=ExitCode.NOT_FOUND,
+                hint=(
+                    "Pass --if-not-exists to succeed idempotently, provide a different NAME, "
+                    f"or delete it first with 'weaviate-cli collection delete {collection}'."
+                ),
             )
 
-        if async_replication_config is not None and not async_enabled:
-            raise Exception(
-                "Error: --async_replication_config requires --async_enabled to be set."
-            )
-
-        if async_replication_config is not None and older_than_version(
-            self.client, "1.36.0"
-        ):
-            click.echo(
-                "Warning: --async_replication_config requires Weaviate >= v1.36.0. "
-                "The server may ignore or reject these settings."
-            )
-
-        warn_removed_async_replication_keys(self.client, async_replication_config)
-
-        if named_vector_name != "default" and not named_vector:
-            raise Exception(
-                "Error: Named vector name is only supported with named vectors. Please use --named_vector to enable named vectors."
-            )
-
-        distance_metric_enum = self._resolve_distance_metric(distance_metric)
-
-        vector_index_map: Dict[str, wvc.VectorIndexConfig] = {
-            "hnsw": wvc.Configure.VectorIndex.hnsw(
-                distance_metric=distance_metric_enum
-            ),
-            "flat": wvc.Configure.VectorIndex.flat(
-                distance_metric=distance_metric_enum
-            ),
-            "dynamic": wvc.Configure.VectorIndex.dynamic(),
-            "dynamic_flat_bq": wvc.Configure.VectorIndex.dynamic(
-                flat=wvc.Configure.VectorIndex.flat(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.bq(),
-                    distance_metric=distance_metric_enum,
-                )
-            ),
-            "dynamic_flat_bq_hnsw_pq": wvc.Configure.VectorIndex.dynamic(
-                flat=wvc.Configure.VectorIndex.flat(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                        rescore_limit=rescore_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                ),
-                hnsw=wvc.Configure.VectorIndex.hnsw(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.pq(
-                        training_limit=training_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                ),
-            ),
-            "dynamic_flat_bq_hnsw_sq": wvc.Configure.VectorIndex.dynamic(
-                flat=wvc.Configure.VectorIndex.flat(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                        rescore_limit=rescore_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                ),
-                hnsw=wvc.Configure.VectorIndex.hnsw(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.sq(
-                        rescore_limit=rescore_limit, training_limit=training_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                ),
-            ),
-            "dynamic_flat_bq_hnsw_bq": wvc.Configure.VectorIndex.dynamic(
-                flat=wvc.Configure.VectorIndex.flat(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                        rescore_limit=rescore_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                ),
-                hnsw=wvc.Configure.VectorIndex.hnsw(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                        rescore_limit=rescore_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                ),
-            ),
-            "dynamic_hnsw_pq": wvc.Configure.VectorIndex.dynamic(
-                hnsw=wvc.Configure.VectorIndex.hnsw(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.pq(
-                        training_limit=training_limit
-                    )
-                )
-            ),
-            "dynamic_hnsw_sq": wvc.Configure.VectorIndex.dynamic(
-                hnsw=wvc.Configure.VectorIndex.hnsw(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.sq(
-                        rescore_limit=rescore_limit, training_limit=training_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                )
-            ),
-            "dynamic_hnsw_bq": wvc.Configure.VectorIndex.dynamic(
-                hnsw=wvc.Configure.VectorIndex.hnsw(
-                    quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                        rescore_limit=rescore_limit
-                    ),
-                    distance_metric=distance_metric_enum,
-                )
-            ),
-            "hnsw_pq": wvc.Configure.VectorIndex.hnsw(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.pq(
-                    training_limit=training_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "hnsw_bq": wvc.Configure.VectorIndex.hnsw(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                    rescore_limit=rescore_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "hnsw_bq_cache": wvc.Configure.VectorIndex.hnsw(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                    cache=True, rescore_limit=rescore_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "hnsw_sq": wvc.Configure.VectorIndex.hnsw(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.sq(
-                    rescore_limit=rescore_limit, training_limit=training_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "hnsw_rq": wvc.Configure.VectorIndex.hnsw(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.rq(
-                    rescore_limit=rescore_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "hnsw_acorn": wvc.Configure.VectorIndex.hnsw(
-                filter_strategy=VectorFilterStrategy.ACORN,
-                distance_metric=distance_metric_enum,
-            ),
-            "hnsw_multivector": wvc.Configure.VectorIndex.hnsw(
-                multi_vector=wvc.Configure.VectorIndex.MultiVector.multi_vector(),
-                distance_metric=distance_metric_enum,
-            ),
-            "flat_bq": wvc.Configure.VectorIndex.flat(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                    rescore_limit=rescore_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "flat_bq_cache": wvc.Configure.VectorIndex.flat(
-                quantizer=wvc.Configure.VectorIndex.Quantizer.bq(
-                    cache=True, rescore_limit=rescore_limit
-                ),
-                distance_metric=distance_metric_enum,
-            ),
-            "hfresh": self._build_hfresh_config(
-                max_posting_size_kb=hfresh_max_posting_size_kb,
-                distance_metric=distance_metric_enum,
-                rescore_limit=rescore_limit,
-                replicas=hfresh_replicas,
-                search_probe=hfresh_search_probe,
-            ),
+        self.client.collections.create_from_dict(spec)
+        return {
+            "collection": collection,
+            "created": True,
+            "already_exists": False,
         }
-
-        # Vectorizer configurations
-        vectorizers_config = {
-            "contextionary": (
-                wvc.Configure.NamedVectors.text2vec_contextionary,
-                wvc.Configure.Vectorizer.text2vec_contextionary,
-                {},
-            ),
-            "transformers": (
-                wvc.Configure.NamedVectors.text2vec_transformers,
-                wvc.Configure.Vectorizer.text2vec_transformers,
-                {},
-            ),
-            "openai": (
-                wvc.Configure.NamedVectors.text2vec_openai,
-                wvc.Configure.Vectorizer.text2vec_openai,
-                {"base_url": vectorizer_base_url if vectorizer_base_url else None},
-            ),
-            "ollama": (
-                wvc.Configure.NamedVectors.text2vec_ollama,
-                wvc.Configure.Vectorizer.text2vec_ollama,
-                {
-                    "model": "snowflake-arctic-embed:33m",
-                    "api_endpoint": "http://ollama.weaviate.svc.cluster.local:11434",
-                },
-            ),
-            "cohere": (
-                wvc.Configure.NamedVectors.text2vec_cohere,
-                wvc.Configure.Vectorizer.text2vec_cohere,
-                {"base_url": vectorizer_base_url if vectorizer_base_url else None},
-            ),
-            "jinaai": (
-                wvc.Configure.NamedVectors.text2vec_jinaai,
-                wvc.Configure.Vectorizer.text2vec_jinaai,
-                {
-                    "base_url": vectorizer_base_url if vectorizer_base_url else None,
-                },
-            ),
-            "weaviate": (
-                wvc.Configure.NamedVectors.text2vec_weaviate,
-                wvc.Configure.Vectorizer.text2vec_weaviate,
-                {"base_url": vectorizer_base_url if vectorizer_base_url else None},
-            ),
-            "weaviate-1.5": (
-                wvc.Configure.NamedVectors.text2vec_weaviate,
-                wvc.Configure.Vectorizer.text2vec_weaviate,
-                {
-                    "base_url": vectorizer_base_url if vectorizer_base_url else None,
-                    "model": "Snowflake/snowflake-arctic-embed-m-v1.5",
-                },
-            ),
-            "model2vec": (
-                wvc.Configure.NamedVectors.text2vec_model2vec,
-                wvc.Configure.Vectorizer.text2vec_model2vec,
-                {},
-            ),
-            "none": (
-                wvc.Configure.NamedVectors.none,
-                wvc.Configure.Vectorizer.none,
-                {},
-            ),
-        }
-
-        object_ttl_type_map: Dict[str, wvc.ObjectTTLType] = {
-            "create": wvc.Configure.ObjectTTL.delete_by_creation_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "update": wvc.Configure.ObjectTTL.delete_by_update_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "property": wvc.Configure.ObjectTTL.delete_by_date_property(
-                property_name=object_ttl_property_name
-                or CreateCollectionDefaults.object_ttl_property_name,
-                ttl_offset=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-        }
-
-        vectorizer_map: Dict[str, wvc.VectorizerConfig] = {}
-        if named_vector:
-            # Common arguments for named vectors
-            named_vector_args = {
-                "name": named_vector_name,
-                "vector_index_config": vector_index_map[vector_index],
-            }
-            for name, (
-                named_func,
-                _,
-                params,
-            ) in vectorizers_config.items():
-                vectorizer_map[name] = named_func(**named_vector_args, **params)
-
-            # Add jinaai_colbert only for named vectors
-            vectorizer_map["jinaai_colbert"] = (
-                wvc.Configure.NamedVectors.text2colbert_jinaai(**named_vector_args)
-            )
-        else:
-            for name, (
-                _,
-                default_func,
-                params,
-            ) in vectorizers_config.items():
-                vectorizer_map[name] = default_func(**params)
-
-        inverted_index_map: Dict[str, wvc.InvertedIndexConfig] = {
-            "timestamp": wvc.Configure.inverted_index(index_timestamps=True),
-            "null": wvc.Configure.inverted_index(index_null_state=True),
-            "length": wvc.Configure.inverted_index(index_property_length=True),
-        }
-
-        # Collection schema
-        properties: List[wvc.Property] = [
-            wvc.Property(name="title", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="genres", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="keywords", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="director", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="popularity", data_type=wvc.DataType.NUMBER),
-            wvc.Property(name="runtime", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="cast", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="originalLanguage", data_type=wvc.DataType.TEXT),
-            wvc.Property(
-                name="productionCountries",
-                data_type=wvc.DataType.OBJECT_ARRAY,
-                nested_properties=[
-                    wvc.Property(name="iso_3166_1", data_type=wvc.DataType.TEXT),
-                    wvc.Property(name="name", data_type=wvc.DataType.TEXT),
-                ],
-            ),
-            wvc.Property(
-                name="spokenLanguages",
-                data_type=wvc.DataType.OBJECT_ARRAY,
-                nested_properties=[
-                    wvc.Property(name="iso_639_1", data_type=wvc.DataType.TEXT),
-                    wvc.Property(name="name", data_type=wvc.DataType.TEXT),
-                ],
-            ),
-            wvc.Property(name="tagline", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="budget", data_type=wvc.DataType.NUMBER),
-            wvc.Property(name="releaseDate", data_type=wvc.DataType.DATE),
-            wvc.Property(name="revenue", data_type=wvc.DataType.NUMBER),
-            wvc.Property(name="status", data_type=wvc.DataType.TEXT),
-            wvc.Property(name="coverImage", data_type=wvc.DataType.BLOB),
-        ]
-
-        rds_map = {
-            "delete_on_conflict": wvc.ReplicationDeletionStrategy.DELETE_ON_CONFLICT,
-            "no_automated_resolution": wvc.ReplicationDeletionStrategy.NO_AUTOMATED_RESOLUTION,
-            "time_based_resolution": wvc.ReplicationDeletionStrategy.TIME_BASED_RESOLUTION,
-        }
-
-        try:
-            if vectorizer not in vectorizer_map.keys():
-                raise Exception(
-                    f"Error: Vectorizer '{vectorizer}' is not supported. Please use one of the following: {list(vectorizer_map.keys())}"
-                )
-
-            self.client.collections.create(
-                name=collection,
-                vector_index_config=(
-                    vector_index_map[vector_index] if not named_vector else None
-                ),
-                inverted_index_config=(
-                    inverted_index_map[inverted_index] if inverted_index else None
-                ),
-                replication_config=wvc.Configure.replication(
-                    factor=replication_factor,
-                    async_enabled=async_enabled,
-                    deletion_strategy=(
-                        rds_map[replication_deletion_strategy]
-                        if replication_deletion_strategy
-                        else None
-                    ),
-                    async_config=(
-                        wvc.Configure.Replication.async_config(
-                            **async_replication_config
-                        )
-                        if async_replication_config is not None
-                        else None
-                    ),
-                ),
-                sharding_config=(
-                    wvc.Configure.sharding(desired_count=shards) if shards > 0 else None
-                ),
-                multi_tenancy_config=wvc.Configure.multi_tenancy(
-                    enabled=multitenant,
-                    auto_tenant_creation=auto_tenant_creation,
-                    auto_tenant_activation=auto_tenant_activation,
-                ),
-                vectorizer_config=(
-                    [vectorizer_map[vectorizer]]
-                    if named_vector
-                    else vectorizer_map[vectorizer]
-                ),
-                object_ttl_config=(
-                    object_ttl_type_map[object_ttl_type]
-                    if object_ttl_time is not None
-                    else None
-                ),
-                properties=(properties if not force_auto_schema else None),
-            )
-        except Exception as e:
-
-            raise Exception(f"Error creating Collection '{collection}': {e}")
-
-        assert self.client.collections.exists(collection)
-
-        if json_output:
-            click.echo(
-                json.dumps(
-                    {
-                        "status": "success",
-                        "message": f"Collection '{collection}' created successfully in Weaviate.",
-                    },
-                    indent=2,
-                )
-            )
-        else:
-            click.echo(f"Collection '{collection}' created successfully in Weaviate.")
 
     def update_collection(
         self,
-        collection: str = UpdateCollectionDefaults.collection,
-        description: Optional[str] = UpdateCollectionDefaults.description,
-        vector_index: Optional[str] = UpdateCollectionDefaults.vector_index,
+        collection: str | None = UpdateCollectionDefaults.collection,
+        description: str | None = UpdateCollectionDefaults.description,
+        vector_index: str | None = UpdateCollectionDefaults.vector_index,
         training_limit: int = UpdateCollectionDefaults.training_limit,
-        async_enabled: Optional[bool] = UpdateCollectionDefaults.async_enabled,
-        replication_factor: Optional[int] = UpdateCollectionDefaults.replication_factor,
-        auto_tenant_creation: Optional[
-            bool
-        ] = UpdateCollectionDefaults.auto_tenant_creation,
-        auto_tenant_activation: Optional[
-            bool
-        ] = UpdateCollectionDefaults.auto_tenant_activation,
-        replication_deletion_strategy: Optional[
-            str
-        ] = UpdateCollectionDefaults.replication_deletion_strategy,
-        json_output: bool = False,
+        async_enabled: bool | None = UpdateCollectionDefaults.async_enabled,
+        replication_factor: int | None = UpdateCollectionDefaults.replication_factor,
+        auto_tenant_creation: bool
+        | None = UpdateCollectionDefaults.auto_tenant_creation,
+        auto_tenant_activation: bool
+        | None = UpdateCollectionDefaults.auto_tenant_activation,
+        replication_deletion_strategy: str
+        | None = UpdateCollectionDefaults.replication_deletion_strategy,
         object_ttl_type: str = UpdateCollectionDefaults.object_ttl_type,
-        object_ttl_time: Optional[int] = UpdateCollectionDefaults.object_ttl_time,
-        object_ttl_filter_expired: Optional[
-            bool
-        ] = UpdateCollectionDefaults.object_ttl_filter_expired,
-        object_ttl_property_name: Optional[
-            str
-        ] = UpdateCollectionDefaults.object_ttl_property_name,
-        async_replication_config: Optional[Dict[str, int]] = None,
-    ) -> None:
-
+        object_ttl_time: int | None = UpdateCollectionDefaults.object_ttl_time,
+        object_ttl_filter_expired: bool
+        | None = UpdateCollectionDefaults.object_ttl_filter_expired,
+        object_ttl_property_name: str
+        | None = UpdateCollectionDefaults.object_ttl_property_name,
+        async_replication_config: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Update operational configuration for an existing collection."""
+        if not collection:
+            raise CLIError(
+                code="MISSING_COLLECTION_NAME",
+                message="Collection name is required.",
+                exit_code=ExitCode.USAGE,
+            )
         if (
             object_ttl_type not in ("property", "disable")
             and object_ttl_property_name
             != UpdateCollectionDefaults.object_ttl_property_name
         ):
-            raise Exception(
-                "object_ttl_property_name is only valid when object_ttl_type is 'property'."
+            raise CLIError(
+                code="INVALID_TTL_CONFIG",
+                message="object_ttl_property_name is only valid when object_ttl_type is 'property'.",
+                exit_code=ExitCode.USAGE,
+            )
+        if (
+            object_ttl_type == "property"
+            and object_ttl_time is not None
+            and not object_ttl_property_name
+        ):
+            raise CLIError(
+                code="INVALID_TTL_CONFIG",
+                message="object_ttl_property_name is required when object_ttl_type is 'property'.",
+                exit_code=ExitCode.USAGE,
             )
         if async_replication_config is not None and async_enabled is False:
-            raise Exception(
-                "Error: --async_replication_config cannot be used when --async_enabled is False."
+            raise CLIError(
+                code="INVALID_REPLICATION_CONFIG",
+                message="--async-replication-config cannot be used when --async-enabled is False.",
+                exit_code=ExitCode.USAGE,
             )
 
+        warnings: list[str] = []
         if async_replication_config is not None and older_than_version(
             self.client, "1.36.0"
         ):
-            click.echo(
-                "Warning: --async_replication_config requires Weaviate >= v1.36.0. "
+            warnings.append(
+                "--async-replication-config requires Weaviate >= v1.36.0. "
                 "The server may ignore or reject these settings."
             )
 
-        warn_removed_async_replication_keys(self.client, async_replication_config)
+        if async_replication_config:
+            removed = sorted(
+                ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS & set(async_replication_config)
+            )
+            if removed and not older_than_version(
+                self.client, ASYNC_REPLICATION_CONFIG_REMOVED_VERSION
+            ):
+                warnings.append(
+                    f"{', '.join(removed)} removed from the Weaviate server schema in "
+                    f"v{ASYNC_REPLICATION_CONFIG_REMOVED_VERSION}. "
+                    "This server will ignore these settings."
+                )
 
         if not self.client.collections.exists(collection):
-
-            raise Exception(
-                f"Error: Collection '{collection}' does not exist in Weaviate. Create first using ./create_collection.py"
+            raise CLIError(
+                code="COLLECTION_NOT_FOUND",
+                message=f"Collection '{collection}' does not exist.",
+                exit_code=ExitCode.NOT_FOUND,
+                hint="Run 'weaviate-cli collection list' to see existing collections.",
             )
 
-        vector_index_map: Dict[str, wvc.VectorIndexConfig] = {
+        vector_index_map: dict[str, Any] = {
             "hnsw": wvc.Reconfigure.VectorIndex.hnsw(),
             "flat": wvc.Reconfigure.VectorIndex.flat(),
             "hnsw_pq": wvc.Reconfigure.VectorIndex.hnsw(
@@ -717,45 +268,50 @@ class CollectionManager:
             ),
         }
 
-        object_ttl_type_map: Dict[str, wvc.ObjectTTLType] = {
-            "create": wvc.Reconfigure.ObjectTTL.delete_by_creation_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "update": wvc.Reconfigure.ObjectTTL.delete_by_update_time(
-                time_to_live=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "property": wvc.Reconfigure.ObjectTTL.delete_by_date_property(
-                property_name=object_ttl_property_name
-                or UpdateCollectionDefaults.object_ttl_property_name,
-                ttl_offset=object_ttl_time,
-                filter_expired_objects=object_ttl_filter_expired,
-            ),
-            "disable": wvc.Reconfigure.ObjectTTL.disable(),
-        }
+        object_ttl_config: Any = None
+        if object_ttl_type == "disable":
+            object_ttl_config = wvc.Reconfigure.ObjectTTL.disable()
+        elif object_ttl_time is not None:
+            if object_ttl_type == "create":
+                object_ttl_config = wvc.Reconfigure.ObjectTTL.delete_by_creation_time(
+                    time_to_live=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
+            elif object_ttl_type == "update":
+                object_ttl_config = wvc.Reconfigure.ObjectTTL.delete_by_update_time(
+                    time_to_live=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
+            elif object_ttl_type == "property":
+                assert object_ttl_property_name is not None
+                object_ttl_config = wvc.Reconfigure.ObjectTTL.delete_by_date_property(
+                    property_name=object_ttl_property_name,
+                    ttl_offset=object_ttl_time,
+                    filter_expired_objects=object_ttl_filter_expired,
+                )
 
         col_obj: Collection = self.client.collections.get(collection)
+        current_cfg = col_obj.config.get()
         rf = (
             replication_factor
             if replication_factor is not None
-            else col_obj.config.get().replication_config.factor
+            else current_cfg.replication_config.factor
         )
         rds_map = {
             "delete_on_conflict": wvc.ReplicationDeletionStrategy.DELETE_ON_CONFLICT,
             "no_automated_resolution": wvc.ReplicationDeletionStrategy.NO_AUTOMATED_RESOLUTION,
             "time_based_resolution": wvc.ReplicationDeletionStrategy.TIME_BASED_RESOLUTION,
         }
-        mt = col_obj.config.get().multi_tenancy_config.enabled
-        auto_tenant_creation = (
+        mt = current_cfg.multi_tenancy_config.enabled
+        resolved_auto_creation = (
             auto_tenant_creation
             if auto_tenant_creation is not None
-            else col_obj.config.get().multi_tenancy_config.auto_tenant_creation
+            else current_cfg.multi_tenancy_config.auto_tenant_creation
         )
-        auto_tenant_activation = (
+        resolved_auto_activation = (
             auto_tenant_activation
             if auto_tenant_activation is not None
-            else col_obj.config.get().multi_tenancy_config.auto_tenant_activation
+            else current_cfg.multi_tenancy_config.auto_tenant_activation
         )
 
         col_obj.config.update(
@@ -763,103 +319,65 @@ class CollectionManager:
             vectorizer_config=(
                 vector_index_map[vector_index] if vector_index else None
             ),
-            replication_config=(
-                wvc.Reconfigure.replication(
-                    factor=rf,
-                    async_enabled=async_enabled if async_enabled is not None else None,
-                    deletion_strategy=(
-                        rds_map[replication_deletion_strategy]
-                        if replication_deletion_strategy
-                        else None
-                    ),
-                    async_config=(
-                        wvc.Reconfigure.Replication.async_config(
-                            **async_replication_config
-                        )
-                        if async_replication_config is not None
-                        else None
-                    ),
-                )
+            replication_config=wvc.Reconfigure.replication(
+                factor=rf,
+                async_enabled=async_enabled if async_enabled is not None else None,
+                deletion_strategy=(
+                    rds_map[replication_deletion_strategy]
+                    if replication_deletion_strategy
+                    else None
+                ),
+                async_config=(
+                    wvc.Reconfigure.Replication.async_config(**async_replication_config)
+                    if async_replication_config is not None
+                    else None
+                ),
             ),
             multi_tenancy_config=(
                 wvc.Reconfigure.multi_tenancy(
-                    auto_tenant_creation=auto_tenant_creation,
-                    auto_tenant_activation=auto_tenant_activation,
+                    auto_tenant_creation=resolved_auto_creation,
+                    auto_tenant_activation=resolved_auto_activation,
                 )
                 if mt
                 else None
             ),
-            object_ttl_config=(
-                object_ttl_type_map[object_ttl_type]
-                if object_ttl_time is not None or object_ttl_type == "disable"
-                else None
-            ),
+            object_ttl_config=object_ttl_config,
         )
 
-        assert self.client.collections.exists(collection)
-
-        if json_output:
-            click.echo(
-                json.dumps(
-                    {
-                        "status": "success",
-                        "message": f"Collection '{collection}' modified successfully in Weaviate.",
-                    },
-                    indent=2,
-                )
-            )
-        else:
-            click.echo(f"Collection '{collection}' modified successfully in Weaviate.")
+        return {
+            "collection": collection,
+            "updated": True,
+            "warnings": warnings,
+        }
 
     def delete_collection(
         self,
-        collection: str = DeleteCollectionDefaults.collection,
-        all: bool = DeleteCollectionDefaults.all,
-        json_output: bool = False,
-    ) -> None:
-        if all:
-            collections: List[str] = self.client.collections.list_all()
-            for collection in collections:
-                if not json_output:
-                    click.echo(f"Deleting collection '{collection}'")
-                self.client.collections.delete(collection)
-            if json_output:
-                click.echo(
-                    json.dumps(
-                        {
-                            "status": "success",
-                            "message": "All collections deleted successfully in Weaviate.",
-                        },
-                        indent=2,
-                    )
-                )
-            else:
-                click.echo("All collections deleted successfully in Weaviate.")
-        else:
-            if self.client.collections.exists(collection):
-                try:
-                    self.client.collections.delete(collection)
-                except Exception as e:
+        collection: str | None = None,
+        *,
+        delete_all: bool = False,
+    ) -> dict[str, Any]:
+        """Delete a single collection or all collections."""
+        if not delete_all and not collection:
+            raise CLIError(
+                code="MISSING_COLLECTION_NAME",
+                message="Collection name is required unless --all is specified.",
+                exit_code=ExitCode.USAGE,
+            )
 
-                    raise Exception(
-                        f"Failed to delete collection '{collection}' in Weaviate.: {e}"
-                    )
-            else:
-                raise Exception(f"Collection '{collection}' doesn't exist in Weaviate.")
+        if delete_all:
+            names = list(self.client.collections.list_all())
+            for col_name in names:
+                self.client.collections.delete(col_name)
+            return {"deleted": names, "count": len(names)}
 
-            assert not self.client.collections.exists(collection)
+        assert collection is not None
+        if not self.client.collections.exists(collection):
+            raise CLIError(
+                code="COLLECTION_NOT_FOUND",
+                message=f"Collection '{collection}' does not exist.",
+                exit_code=ExitCode.NOT_FOUND,
+                hint="Run 'weaviate-cli collection list' to see existing collections.",
+            )
 
-            if json_output:
-                click.echo(
-                    json.dumps(
-                        {
-                            "status": "success",
-                            "message": f"Collection '{collection}' deleted successfully in Weaviate.",
-                        },
-                        indent=2,
-                    )
-                )
-            else:
-                click.echo(
-                    f"Collection '{collection}' deleted successfully in Weaviate."
-                )
+        self.client.collections.delete(collection)
+        return {"deleted": [collection], "count": 1}

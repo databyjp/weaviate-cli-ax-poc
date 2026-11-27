@@ -193,7 +193,7 @@ pytest test/integration/test_auth_integration.py
 
 The CI runs in GitHub Actions (`.github/workflows/main.yaml`):
 
-1. **lint-and-format**: Black check + build/twine check (Python 3.11)
+1. **lint-and-format**: `make lint`, `make typecheck`, then build/twine check (Python 3.11)
 2. **unit-tests** (needs lint): Matrix across Python 3.9-3.13, generates HTML reports
 3. **integration-tests** (needs unit): Latest Weaviate version, modules enabled, backup enabled
 4. **integration-auth-tests** (needs unit): Same as integration but with RBAC enabled

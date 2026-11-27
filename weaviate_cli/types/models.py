@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass
@@ -19,9 +18,9 @@ class ShardInfo:
 
     name: str
     collection: str
-    node_objects: Dict[str, int]  # node_name -> object_count
+    node_objects: dict[str, int]  # node_name -> object_count
     vector_indexing_status: str
-    loaded: bool
+    loaded: bool | None
 
 
 @dataclass
@@ -29,5 +28,5 @@ class CollectionInfo:
     """Information about a collection in the cluster."""
 
     name: str
-    node_objects: Dict[str, int]  # node_name -> object_count
+    node_objects: dict[str, int]  # node_name -> object_count
     total_objects: int

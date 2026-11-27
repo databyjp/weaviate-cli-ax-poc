@@ -1,4 +1,4 @@
-.PHONY: format lint test install-dev
+.PHONY: format lint typecheck test install-dev
 
 build:
 	python -m build
@@ -11,10 +11,14 @@ install-dev:
 	pre-commit install
 
 format:
-	black cli.py weaviate_cli test
+	ruff format cli.py weaviate_cli test
 
 lint:
-	black --check cli.py weaviate_cli test
+	ruff check cli.py weaviate_cli test
+	ruff format --check cli.py weaviate_cli test
+
+typecheck:
+	pyright --pythonpath "$$(command -v python)"
 
 test:
 	pytest test/unittests

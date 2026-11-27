@@ -1,20 +1,18 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+from weaviate.rbac.models import Permissions, RoleScope
+
 from weaviate_cli.utils import (
+    ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS,
+    ASYNC_REPLICATION_CONFIG_HELP,
+    ASYNC_REPLICATION_CONFIG_KEYS,
     get_client_from_context,
     get_random_string,
-    pp_objects,
-    parse_permission,
     parse_async_replication_config,
+    parse_permission,
     warn_removed_async_replication_keys,
-    ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS,
-    ASYNC_REPLICATION_CONFIG_KEYS,
-    ASYNC_REPLICATION_CONFIG_HELP,
 )
-from weaviate.collections import Collection
-from io import StringIO
-import sys
-from weaviate.rbac.models import Permissions, RoleScope
 
 
 def test_get_client_from_context(mock_click_context, mock_client):
@@ -37,75 +35,6 @@ def test_get_random_string():
     # Test only lowercase letters
     random_str = get_random_string(20)
     assert all(c.islower() for c in random_str)
-
-
-def test_pp_objects_empty():
-    # Test empty response
-    response = MagicMock()
-    response.objects = []
-
-    # Capture stdout
-    captured_output = StringIO()
-    sys.stdout = captured_output
-
-    pp_objects(response, ["name", "description"])
-
-    sys.stdout = sys.__stdout__
-    assert "No objects found" in captured_output.getvalue()
-
-
-def test_pp_objects_with_data():
-    # Mock response object
-    response = MagicMock()
-    mock_obj = MagicMock()
-    mock_obj.uuid = "test-uuid-1234"
-    mock_obj.properties = {"name": "test_name", "description": "test_description"}
-    mock_obj.metadata.distance = 0.5
-    mock_obj.metadata.certainty = 0.8
-    mock_obj.metadata.score = 0.9
-    response.objects = [mock_obj]
-
-    # Capture stdout
-    captured_output = StringIO()
-    sys.stdout = captured_output
-
-    pp_objects(response, ["name", "description"])
-
-    sys.stdout = sys.__stdout__
-    output = captured_output.getvalue()
-
-    # Verify output contains expected data
-    assert "test-uuid-1234" in output
-    assert "test_name" in output
-    assert "test_description" in output
-    assert "0.5" in output
-    assert "0.8" in output
-    assert "0.9" in output
-    assert "Total: 1 objects" in output
-
-
-def test_pp_objects_missing_properties():
-    # Test handling of missing properties
-    response = MagicMock()
-    mock_obj = MagicMock()
-    mock_obj.uuid = "test-uuid-5678"
-    mock_obj.properties = {"name": "test_name"}  # Missing description
-    mock_obj.metadata.distance = None
-    mock_obj.metadata.certainty = None
-    mock_obj.metadata.score = None
-    response.objects = [mock_obj]
-
-    captured_output = StringIO()
-    sys.stdout = captured_output
-
-    pp_objects(response, ["name", "description"])
-
-    sys.stdout = sys.__stdout__
-    output = captured_output.getvalue()
-
-    assert "test-uuid-5678" in output
-    assert "test_name" in output
-    assert "None" in output
 
 
 def test_parse_permission_collections():
@@ -132,7 +61,6 @@ def test_parse_permission_collections():
 
 
 def test_parse_permissions_tenant():
-
     assert parse_permission("create_tenants:Movies") == Permissions.tenants(
         collection="Movies", create=True
     )
@@ -184,7 +112,6 @@ def test_parse_permission_data():
 
 
 def test_parse_permission_roles():
-
     # Test basic role permissions
     assert parse_permission("read_roles:custom") == Permissions.roles(
         role="custom", read=True
@@ -431,6 +358,7 @@ def test_parse_async_replication_config_all_keys():
         "propagation_batch_size=14",
     )
     result = parse_async_replication_config(all_keys)
+    assert result is not None
     assert len(result) == 14
     assert result["max_workers"] == 1
     assert result["propagation_batch_size"] == 14

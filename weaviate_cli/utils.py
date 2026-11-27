@@ -2,15 +2,15 @@
 Utility functions.
 """
 
-from collections.abc import Sequence
 import json
-import click
-import string
 import random
+import string
+from collections.abc import Callable, Sequence
+
+import click
 import semver
 import weaviate
-from weaviate.rbac.models import Permissions, RoleScope, PermissionsCreateType
-from typing import Callable, Optional, Union, List
+from weaviate.rbac.models import Permissions, PermissionsCreateType, RoleScope
 
 
 def get_client_from_context(ctx: click.Context) -> weaviate.WeaviateClient:
@@ -54,68 +54,6 @@ def print_json_or_text(
         text_fn()
 
 
-# Pretty print objects in the response in a table format
-def pp_objects(response, main_properties, json_output: bool = False):
-
-    objects = []
-    if type(response) == weaviate.collections.classes.internal.ObjectSingleReturn:
-        objects.append(response)
-    else:
-        objects = response.objects
-
-    if json_output:
-        json_objects = []
-        for obj in objects:
-            obj_dict = {
-                "uuid": str(obj.uuid),
-                "properties": {
-                    prop: obj.properties.get(prop, None) for prop in main_properties
-                },
-                "distance": (
-                    getattr(obj.metadata, "distance", None) if obj.metadata else None
-                ),
-                "certainty": (
-                    getattr(obj.metadata, "certainty", None) if obj.metadata else None
-                ),
-                "score": getattr(obj.metadata, "score", None) if obj.metadata else None,
-            }
-            json_objects.append(obj_dict)
-        click.echo(
-            json.dumps(
-                {"objects": json_objects, "total": len(json_objects)},
-                indent=2,
-                default=str,
-            )
-        )
-        return
-
-    # Create the header
-    header = f"{'ID':<37}"
-    for prop in main_properties:
-        header += f"{prop.capitalize():<37}"
-    header += f"{'Distance':<11}{'Certainty':<11}{'Score':<11}"
-    print(header)
-
-    if len(objects) == 0:
-        print("No objects found")
-        return
-
-    # Print each object
-    for obj in objects:
-        row = f"{str(obj.uuid):<36} "
-        for prop in main_properties:
-            row += f"{str(obj.properties.get(prop, ''))[:36]:<36} "
-        row += f"{str(obj.metadata.distance)[:10] if hasattr(obj.metadata, 'distance') else 'None':<10} "
-        row += f"{str(obj.metadata.certainty)[:10] if hasattr(obj.metadata, 'certainty') else 'None':<10} "
-        row += f"{str(obj.metadata.score)[:10] if hasattr(obj.metadata, 'score') else 'None':<10}"
-        print(row)
-
-    # Print footer
-    footer = f"{'':<37}" * (len(main_properties) + 1) + f"{'':<11}{'':<11}{'':<11}"
-    print(footer)
-    print(f"Total: {len(objects)} objects")
-
-
 ASYNC_REPLICATION_CONFIG_KEYS = {
     "max_workers",
     "hashtree_height",
@@ -150,7 +88,7 @@ ASYNC_REPLICATION_CONFIG_HELP = (
     "Valid keys: " + ", ".join(sorted(ASYNC_REPLICATION_CONFIG_KEYS)) + ". "
     "All values must be integers. "
     'Use "reset" to revert all async replication settings to server defaults (update only). '
-    "Requires --async_enabled on create and Weaviate >= v1.36.0. "
+    "Requires --async-enabled on create and Weaviate >= v1.36.0. "
     "Deprecated keys, ignored by Weaviate >= v"
     + ASYNC_REPLICATION_CONFIG_REMOVED_VERSION
     + ": "
@@ -160,8 +98,8 @@ ASYNC_REPLICATION_CONFIG_HELP = (
 
 
 def parse_async_replication_config(
-    config_tuples: Optional[tuple],
-) -> Optional[dict]:
+    config_tuples: tuple | None,
+) -> dict | None:
     """Parse async replication config key=value tuples into a dict.
 
     Args:
@@ -211,7 +149,7 @@ def parse_async_replication_config(
 
 
 def warn_removed_async_replication_keys(
-    client, async_replication_config: Optional[dict]
+    client, async_replication_config: dict | None
 ) -> None:
     """Warn when async replication keys the target server no longer supports are used.
 
@@ -233,7 +171,8 @@ def warn_removed_async_replication_keys(
     click.echo(
         f"Warning: {', '.join(removed)} removed from the Weaviate server schema in "
         f"v{ASYNC_REPLICATION_CONFIG_REMOVED_VERSION}. "
-        "This server will ignore these settings."
+        "This server will ignore these settings.",
+        err=True,
     )
 
 
@@ -364,7 +303,7 @@ def parse_permission(perm: str) -> PermissionsCreateType:
                 action=actions,
                 resource=resource,
                 collection=collection,
-                tenant=tenant,
+                tenant=tenant if tenant is not None else "*",
                 alias=alias,
                 role=role,
                 role_scope=role_scope,
@@ -375,14 +314,14 @@ def parse_permission(perm: str) -> PermissionsCreateType:
 
 
 def _create_permission(
-    action: Union[str, Sequence[str]],
+    action: str | Sequence[str],
     resource: str,
-    role: Union[str, Sequence[str]] = "*",
-    role_scope: Optional[str] = None,
-    user: Union[str, Sequence[str]] = "*",
-    collection: Union[str, Sequence[str]] = "*",
-    tenant: Union[str, Sequence[str]] = "*",
-    alias: Union[str, Sequence[str]] = "*",
+    role: str | Sequence[str] = "*",
+    role_scope: str | None = None,
+    user: str | Sequence[str] = "*",
+    collection: str | Sequence[str] = "*",
+    tenant: str | Sequence[str] = "*",
+    alias: str | Sequence[str] = "*",
     verbosity: str = "minimal",
 ) -> PermissionsCreateType:
     """Helper function to create individual RBAC permission objects."""
@@ -420,7 +359,7 @@ def _create_permission(
         }
         scope = None
         if role_scope:
-            if role_scope not in roles_scope_map.keys():
+            if role_scope not in roles_scope_map:
                 raise ValueError(
                     f"Invalid role scope: {role_scope}, expected one of: {', '.join(roles_scope_map.keys())}"
                 )

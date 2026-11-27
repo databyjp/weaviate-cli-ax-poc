@@ -1,14 +1,17 @@
-from typing import Optional, List, Dict
 import json
+from collections.abc import Mapping
+
 import click
-from weaviate_cli.utils import older_than_version, parse_permission
 from weaviate import WeaviateClient
 from weaviate.rbac.models import Role, RoleBase
+
 from weaviate_cli.defaults import (
     CreateRoleDefaults,
     DeleteRoleDefaults,
     GetRoleDefaults,
 )
+from weaviate_cli.errors import CLIError, ExitCode
+from weaviate_cli.utils import older_than_version, parse_permission
 
 
 class RoleManager:
@@ -44,17 +47,17 @@ class RoleManager:
             else:
                 click.echo(f"Role '{role_name}' created successfully in Weaviate.")
         except Exception as e:
-            raise Exception(f"Error creating role '{role_name}': {e}")
+            raise Exception(f"Error creating role '{role_name}': {e}") from e
 
-    def get_role(self, role_name: str) -> Optional[Role]:
+    def get_role(self, role_name: str) -> Role | None:
         try:
             return self.client.roles.get(role_name=role_name)
         except Exception as e:
-            raise Exception(f"Error getting role '{role_name}': {e}")
+            raise Exception(f"Error getting role '{role_name}': {e}") from e
 
     def get_roles_from_user(
         self, user_name: str, user_type: str = GetRoleDefaults.user_type
-    ) -> Dict[str, RoleBase]:
+    ) -> Mapping[str, RoleBase]:
         try:
             if older_than_version(self.client, "1.30.0"):
                 return self.client.users.get_assigned_roles(user_id=user_name)
@@ -66,17 +69,22 @@ class RoleManager:
                 return self.client.users.oidc.get_assigned_roles(
                     user_id=user_name, include_permissions=False
                 )
+            raise ValueError(f"Unsupported user type: {user_type}")
         except Exception as e:
             raise Exception(
                 f"Error getting roles from {user_type} user '{user_name}': {e}"
-            )
+            ) from e
 
     def delete_role(
         self, role_name: str = DeleteRoleDefaults.role_name, json_output: bool = False
     ) -> None:
         try:
             if not self.client.roles.exists(role_name=role_name):
-                raise Exception(f"Role '{role_name}' does not exist.")
+                raise CLIError(
+                    code="ROLE_NOT_FOUND",
+                    message=f"Role '{role_name}' does not exist.",
+                    exit_code=ExitCode.NOT_FOUND,
+                )
             self.client.roles.delete(role_name=role_name)
             assert not self.client.roles.exists(role_name=role_name)
             if json_output:
@@ -92,23 +100,23 @@ class RoleManager:
             else:
                 click.echo(f"Role '{role_name}' deleted successfully.")
         except Exception as e:
-            raise Exception(f"Error deleting role '{role_name}': {e}")
+            raise Exception(f"Error deleting role '{role_name}': {e}") from e
 
-    def get_all_roles(self) -> Dict[str, Role]:
+    def get_all_roles(self) -> dict[str, Role]:
         try:
             return self.client.roles.list_all()
         except Exception as e:
-            raise Exception(f"Error getting all roles: {e}")
+            raise Exception(f"Error getting all roles: {e}") from e
 
-    def role_of_current_user(self) -> Dict[str, Role]:
+    def role_of_current_user(self) -> dict[str, Role]:
         """Get the role of the current user."""
         try:
             return self.client.users.get_my_user().roles
         except Exception as e:
-            raise Exception(f"Error getting role of current user: {e}")
+            raise Exception(f"Error getting role of current user: {e}") from e
 
     def add_permission(
-        self, permission: str, role_name: str, json_output: bool = False
+        self, permission: tuple[str, ...], role_name: str, json_output: bool = False
     ) -> None:
         try:
             rbac_permissions = []
@@ -136,10 +144,10 @@ class RoleManager:
         except Exception as e:
             raise Exception(
                 f"Error adding permission '{permission}' to role '{role_name}': {e}"
-            )
+            ) from e
 
     def revoke_permission(
-        self, permission: str, role_name: str, json_output: bool = False
+        self, permission: tuple[str, ...], role_name: str, json_output: bool = False
     ) -> None:
         try:
             rbac_permissions = []
@@ -169,7 +177,7 @@ class RoleManager:
         except Exception as e:
             raise Exception(
                 f"Error revoking permission '{permission}' from role '{role_name}': {e}"
-            )
+            ) from e
 
     @staticmethod
     def role_to_dict(role: Role) -> dict:
@@ -255,7 +263,7 @@ class RoleManager:
             ]
         return role_data
 
-    def print_role(self, role: Optional[Role] = None) -> None:
+    def print_role(self, role: Role | None = None) -> None:
         """Print a role and its permissions in a human readable format."""
         if not role:
             raise ValueError("The role does not exist.")

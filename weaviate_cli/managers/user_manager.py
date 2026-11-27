@@ -1,8 +1,9 @@
 import json
-from typing import List, Optional, Dict, Union
+
 import click
 from weaviate import WeaviateClient
-from weaviate.users.users import OwnUser, UserDB, UserTypes
+from weaviate.users.users import OwnUser, UserDB
+
 from weaviate_cli.defaults import (
     GetUserDefaults,
 )
@@ -14,18 +15,20 @@ class UserManager:
         self.client = client
 
     def get_user_from_role(
-        self, role_name: str = GetUserDefaults.role_name
-    ) -> List[str]:
-        """Get all roles assigned to a user."""
+        self, role_name: str | None = GetUserDefaults.role_name
+    ) -> list[str]:
+        """Get all users assigned to a role."""
+        if role_name is None:
+            raise ValueError("Role name is required.")
         try:
             return self.client.roles.get_assigned_user_ids(role_name=role_name)
         except Exception as e:
-            raise Exception(f"Error getting users for role '{role_name}': {e}")
+            raise Exception(f"Error getting users for role '{role_name}': {e}") from e
 
     def get_user(
         self,
-        user_name: Optional[str] = None,
-    ) -> Union[OwnUser, UserDB]:
+        user_name: str | None = None,
+    ) -> OwnUser | UserDB | None:
         """Get a user in Weaviate. If no user name is provided, the current user is returned."""
 
         try:
@@ -34,48 +37,48 @@ class UserManager:
             else:
                 return self.client.users.db.get(user_id=user_name)
         except Exception as e:
-            raise Exception(f"Error getting user '{user_name}': {e}")
+            raise Exception(f"Error getting user '{user_name}': {e}") from e
 
-    def get_all_users(self) -> List[UserDB]:
+    def get_all_users(self) -> list[UserDB]:
         """Get all users in Weaviate."""
         try:
             return self.client.users.db.list_all()
         except Exception as e:
-            raise Exception(f"Error getting all users: {e}")
+            raise Exception(f"Error getting all users: {e}") from e
 
     def create_user(
         self,
-        user_name: Optional[str] = None,
+        user_name: str | None = None,
     ) -> str:
         """
         Create a user in Weaviate.
         Returns the api key for the user.
         """
         if user_name is None:
-            raise Exception("User name is required.")
+            raise ValueError("User name is required.")
         try:
             return self.client.users.db.create(user_id=user_name)
         except Exception as e:
-            raise Exception(f"Error creating user '{user_name}': {e}")
+            raise Exception(f"Error creating user '{user_name}': {e}") from e
 
     def update_user(
         self,
-        user_name: Optional[str] = None,
+        user_name: str | None = None,
         rotate_api_key: bool = False,
         activate: bool = False,
         deactivate: bool = False,
-    ) -> Optional[str]:
+    ) -> str | bool | None:
         """Update a user in Weaviate.
-        Returns the api key for the user if the api key was rotated, otherwise returns None.
+        Returns the api key for the user if the api key was rotated, otherwise a bool or None.
         """
         if user_name is None:
-            raise Exception("User name is required.")
+            raise ValueError("User name is required.")
         if rotate_api_key and (activate or deactivate):
-            raise Exception(
+            raise ValueError(
                 "Cannot rotate api key and activate or deactivate user at the same time."
             )
         if activate and deactivate:
-            raise Exception("Cannot activate and deactivate user at the same time.")
+            raise ValueError("Cannot activate and deactivate user at the same time.")
         try:
             if rotate_api_key:
                 return self.client.users.db.rotate_key(user_id=user_name)
@@ -83,24 +86,25 @@ class UserManager:
                 return self.client.users.db.activate(user_id=user_name)
             if deactivate:
                 return self.client.users.db.deactivate(user_id=user_name)
+            return None
         except Exception as e:
-            raise Exception(f"Error updating user '{user_name}': {e}")
+            raise Exception(f"Error updating user '{user_name}': {e}") from e
 
     def delete_user(
         self,
-        user_name: Optional[str] = None,
+        user_name: str | None = None,
     ) -> None:
         """Delete a user in Weaviate."""
         if user_name is None:
-            raise Exception("User name is required.")
+            raise ValueError("User name is required.")
         try:
             self.client.users.db.delete(user_id=user_name)
         except Exception as e:
-            raise Exception(f"Error deleting user '{user_name}': {e}")
+            raise Exception(f"Error deleting user '{user_name}': {e}") from e
 
     def add_role(
         self,
-        role_name: tuple[str],
+        role_name: tuple[str, ...],
         user_name: str,
         user_type: str = "db",
         json_output: bool = False,
@@ -136,11 +140,11 @@ class UserManager:
         except Exception as e:
             raise Exception(
                 f"Error assigning {user_type} role '{role_name}' to user '{user_name}': {e}"
-            )
+            ) from e
 
     def revoke_role(
         self,
-        role_name: tuple[str],
+        role_name: tuple[str, ...],
         user_name: str,
         user_type: str = "db",
         json_output: bool = False,
@@ -176,7 +180,7 @@ class UserManager:
         except Exception as e:
             raise Exception(
                 f"Error revoking {user_type} role '{role_name}' from user '{user_name}': {e}"
-            )
+            ) from e
 
     def print_user(self, user: str, json_output: bool = False) -> None:
         """Print user roles in a human readable format."""
@@ -196,9 +200,9 @@ class UserManager:
             )
             return
         print(f"User: {user.user_id}")
-        print(f"Roles:")
+        print("Roles:")
         if len(user.roles) == 0:
-            print(f" - No roles assigned")
+            print(" - No roles assigned")
         else:
             for role in user.roles.keys():
                 print(f" - Role: {role}")
@@ -221,9 +225,9 @@ class UserManager:
         print(f"User: {user.user_id}")
         print(f"Active: {'Yes' if user.active else 'No'}")
         print(f"Type: {user.user_type.name}")
-        print(f"Roles:")
+        print("Roles:")
         if len(user.role_names) == 0:
-            print(f" - No roles assigned")
+            print(" - No roles assigned")
         else:
             for role in user.role_names:
                 print(f" - Role: {role}")
