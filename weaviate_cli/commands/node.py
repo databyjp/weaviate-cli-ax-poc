@@ -53,14 +53,14 @@ def node_group() -> None:
 @click.option(
     "--collection",
     default=GetNodesDefaults.collection,
-    help="Filter shard details to a specific collection.",
+    help="Filter shard details to a specific collection (may be combined with --shards and --shard).",
     shell_complete=collection_name_complete,
 )
 @click.option(
     "--shard",
     default=None,
     type=str,
-    help="Filter shard details to a specific shard name (may be combined with --collection).",
+    help="Filter shard details to a specific shard name (may be combined with --shards and --collection).",
 )
 @click.option(
     "--json/--no-json",
@@ -83,16 +83,15 @@ def list_nodes_cli(
     command = "node list"
     client: WeaviateClient | None = None
     try:
-        if shard and (minimal or collections):
+        shard_view = bool(shards or collection or shard)
+        if sum([shard_view, collections, minimal]) > 1:
             raise CLIError(
                 code="CONFLICTING_OPTIONS",
-                message="--shard cannot be combined with --minimal or --collections.",
-                exit_code=ExitCode.USAGE,
-            )
-        if sum([bool(collection), shards, collections, minimal]) > 1:
-            raise CLIError(
-                code="CONFLICTING_OPTIONS",
-                message="Only one of --collection, --shards, --minimal, or --collections can be provided.",
+                message=(
+                    "Shard options (--shards, --collection, --shard) cannot be combined "
+                    "with --minimal or --collections, and --minimal cannot be combined "
+                    "with --collections."
+                ),
                 exit_code=ExitCode.USAGE,
             )
         client = get_client_from_context(ctx)

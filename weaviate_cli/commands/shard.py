@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 from weaviate import WeaviateClient
+from weaviate.exceptions import UnexpectedStatusCodeError
 
 from weaviate_cli.completion.complete import collection_name_complete
 from weaviate_cli.defaults import GetShardsDefaults, UpdateShardsDefaults
@@ -187,7 +188,31 @@ def shard_state_cli(
     try:
         client = get_client_from_context(ctx)
         manager = ClusterManager(client, click.echo)
-        state = manager.query_sharding_state(collection, shard)
+        try:
+            state = manager.query_sharding_state(collection, shard)
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            if status_code is None and isinstance(
+                exc.__cause__, UnexpectedStatusCodeError
+            ):
+                status_code = getattr(exc.__cause__, "status_code", None)
+            if status_code == 501:
+                raise CLIError(
+                    code="SHARDING_STATE_UNSUPPORTED",
+                    message=(
+                        f"Sharding state endpoint returned HTTP 501 Not Implemented for "
+                        f"collection '{collection}'."
+                    ),
+                    exit_code=ExitCode.RUNTIME,
+                    hint=(
+                        "The sharding-state endpoint requires a cluster with replication "
+                        "enabled. Use 'weaviate-cli shard list --collection "
+                        f"{collection}' or 'weaviate-cli node list --collection "
+                        f"{collection}' to inspect shard status."
+                    ),
+                    details={"status_code": 501},
+                ) from exc
+            raise
         if not state:
             raise CLIError(
                 code="SHARDING_STATE_NOT_FOUND",

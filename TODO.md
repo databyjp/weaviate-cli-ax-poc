@@ -72,9 +72,11 @@ Active checklist, command specifications, and dated progress log for the `weavia
   4. Shard/tenant operational recovery (offload/activate tenant, repair shard state).
   5. Backup create + verify + restore.
   6. Mixed-surface routing (verify CLI vs. MCP vs. SDK selection without thrashing).
-- [ ] Record evaluation metrics (completion rate, turns/tool calls, tokens, zero-hang rate, error recovery, routing accuracy) to inform the post-PoC decision: keep Python or consolidate into the Go `wcloud` binary.
+- [ ] Record evaluation metrics (completion rate, turns/tool calls, tokens, zero-hang rate, error recovery, routing accuracy) to inform the post-PoC implementation decision (keep Python, consolidate into Go `wcloud`, or port to another native language such as Rust).
 
 ### Deferred post-PoC ideas
+- **Adversarial & unhappy-path agent eval suite:** Systematically test dirty local Docker states (unmanaged containers on `8080`, `LOCAL_CONFIG_MISMATCH`, `LOCAL_STARTUP_FAILED` diagnosis via `local logs`), bad declarative `collection update` patch recovery (immutable fields, incompatible quantizers/index types, incomplete `objectTtlConfig`), pre-populated credential non-overwrite guardrails (`--write-env` / `--store`), and ambiguous destructive-cleanup prompts (`--yes` safety).
+- **Cold-start latency & packaging benchmark:** Measure cumulative startup latency and zero-prep install/packaging friction (Python `.venv`/`uvx` vs. single native binary in Go/Rust) when ready to decide on a native rewrite/consolidation.
 - **Weaviate Cloud free-tier limits for existing clusters (upstream-aligned):** Once `wcloud` exposes structured `limits` in `cluster create/get/list -o json` (feedback passed to `wcloud` team) and/or Weaviate Cloud surfaces tier/quota metadata on the cluster API (e.g., `/v1/meta`), replace our local `FREE_TIER_LIMITS` fallback in `cloud_manager.py` and surface free-tier limits upfront in `weaviate-cli status` when working with an existing `.env`-configured free cluster (without coupling `status` to `wcloud`).
 - Local-to-Weaviate Cloud migration command (`migrate`):
   - Tier 1 (DDL/metadata): copy collection schemas, tenants, and aliases from local to WCD, automatically rewriting `text2vec-transformers` to `text2vec-weaviate` (`Snowflake/snowflake-arctic-embed-m-v1.5`), with `--dry-run` preview.

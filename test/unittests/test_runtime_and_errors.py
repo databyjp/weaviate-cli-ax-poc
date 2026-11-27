@@ -183,3 +183,30 @@ def test_emit_error_text_mode_writes_strictly_to_stderr(capsys):
     assert captured.out == ""
     assert "Error [CONNECTION_FAILED]: Could not reach Weaviate" in captured.err
     assert "Hint: Set WEAVIATE_URL" in captured.err
+
+
+def test_classify_missing_module_422_and_not_implemented_501():
+    import httpx
+    from weaviate.exceptions import UnexpectedStatusCodeError
+
+    resp_422 = httpx.Response(
+        422,
+        json={
+            "error": [
+                {
+                    "message": "can't offload tenants, because offload-s3 module is not enabled"
+                }
+            ]
+        },
+    )
+    err_422 = classify_exception(UnexpectedStatusCodeError("Tenant update", resp_422))
+    assert err_422.code == "MODULE_NOT_ENABLED"
+    assert err_422.exit_code == ExitCode.RUNTIME
+    assert err_422.hint is not None
+    assert "status" in err_422.hint
+
+    resp_501 = httpx.Response(501, json={"error": [{"message": "Not Implemented"}]})
+    err_501 = classify_exception(UnexpectedStatusCodeError("Sharding state", resp_501))
+    assert err_501.code == "NOT_IMPLEMENTED"
+    assert err_501.exit_code == ExitCode.RUNTIME
+    assert err_501.details == {"status_code": 501}

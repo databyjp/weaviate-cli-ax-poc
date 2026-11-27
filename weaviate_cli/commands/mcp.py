@@ -193,6 +193,7 @@ def mcp_group() -> None:
         "Examples:\n"
         "  weaviate-cli mcp config\n"
         "  weaviate-cli --env-file .env mcp config --client claude-code\n"
+        "  weaviate-cli --env-file .env mcp config --client claude-code --raw > .mcp.json\n"
         "  weaviate-cli --env-file .env mcp config --client cursor --check\n"
         "  weaviate-cli --env-file .env mcp config --client claude-desktop\n"
         "  weaviate-cli --env-file .env mcp config --client vscode --include-key\n"
@@ -233,6 +234,12 @@ def mcp_group() -> None:
     help="Probe <WEAVIATE_URL>/v1/mcp live to confirm the native MCP endpoint is enabled and reachable.",
 )
 @click.option(
+    "--raw",
+    is_flag=True,
+    default=False,
+    help="Output only the bare MCP client config JSON snippet to stdout (ready to redirect into a file; mutually exclusive with --json).",
+)
+@click.option(
     "--json/--no-json",
     "json_output",
     default=None,
@@ -245,12 +252,20 @@ def mcp_config(
     server_name: str,
     include_key: bool,
     check: bool,
+    raw: bool,
     json_output: bool | None,
 ) -> None:
     """Emit a ready-to-use Streamable HTTP MCP client config for the active Weaviate target."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "mcp config"
     try:
+        if raw and json_output is True:
+            raise CLIError(
+                code="CONFLICTING_OPTIONS",
+                message="--raw cannot be combined with --json.",
+                exit_code=ExitCode.USAGE,
+                hint="Use --raw alone to emit the bare MCP config JSON without the CLI envelope.",
+            )
         config: ConfigManager = ctx.obj["config"]
         api_key = config.get_api_key()
         normalized_client = cast(McpClientFormat, client_format.lower())
@@ -303,6 +318,10 @@ def mcp_config(
                     "Native MCP endpoint is reachable but requires Bearer API key authentication. "
                     "Pass --api-key, --env-file, or set WEAVIATE_API_KEY.",
                 )
+
+        if raw:
+            click.echo(json.dumps(result["config"], indent=2))
+            return
 
         emit_success(
             runtime,

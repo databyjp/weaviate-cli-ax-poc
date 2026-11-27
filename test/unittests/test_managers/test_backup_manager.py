@@ -611,6 +611,8 @@ def test_list_backups_json_and_text(
     assert out["backend"] == "azure"
     assert out["total"] == 1
     assert out["backups"][0]["backup_id"] == "bk-1"
+    assert out["backups"][0]["status"] == "SUCCESS"
+    assert out["backups"][0]["size_gb"] == 0.125
     mock_client_with_backup.backup.list_backups.assert_called_once()
 
     backup_manager.list_backups(backend="azure", json_output=False)
@@ -689,3 +691,28 @@ def test_backup_location_validation(backup_manager: BackupManager) -> None:
             backup_id="bk-1", backend="s3", bucket="only-bucket"
         )
     assert exc_s3.value.code == "INVALID_BACKUP_LOCATION"
+
+
+def test_get_backup_unwraps_status_enum_value(
+    backup_manager: BackupManager, mock_client_with_backup: MagicMock, capsys
+) -> None:
+    from weaviate.backup.backup import BackupStatus
+
+    mock_backup_obj = MagicMock()
+    mock_backup_obj.backup_id = "bk-enum"
+    mock_backup_obj.path = "/tmp/backups/bk-enum"
+    mock_backup_obj.status = BackupStatus.SUCCESS
+    mock_client_with_backup.backup.get_create_status.return_value = mock_backup_obj
+
+    backup_manager.get_backup(
+        backend="filesystem", backup_id="bk-enum", json_output=True
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "SUCCESS"
+
+    backup_manager.get_backup(
+        backend="filesystem", backup_id="bk-enum", json_output=False
+    )
+    text = capsys.readouterr().out
+    assert "Backup Status: SUCCESS" in text
+    assert "BackupStatus." not in text

@@ -525,3 +525,65 @@ def test_delete_property_index(mock_client):
     mock_col.config.delete_property_index.assert_called_once_with(
         property_name="price", index_name="rangeFilters"
     )
+
+
+def test_create_collection_falls_through_when_exists_is_forbidden(mock_client):
+    import httpx
+    from weaviate.exceptions import (
+        InsufficientPermissionsError,
+        UnexpectedStatusCodeError,
+    )
+
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.side_effect = InsufficientPermissionsError(
+        httpx.Response(
+            403,
+            json={
+                "error": [
+                    {
+                        "message": "insufficient permissions to read_collections [Articles]"
+                    }
+                ]
+            },
+        )
+    )
+
+    manager = CollectionManager(mock_client)
+    spec = {"class": "Articles", "vectorizer": "none"}
+
+    # Caller with create_collections (but without read_collections) succeeds.
+    res = manager.create_collection(spec)
+    assert res == {"collection": "Articles", "created": True, "already_exists": False}
+    mock_collections.create_from_dict.assert_called_once_with(spec)
+
+    # Caller with neither read nor create sees the real create_collections denial.
+    mock_collections.create_from_dict.side_effect = InsufficientPermissionsError(
+        httpx.Response(
+            403,
+            json={
+                "error": [
+                    {
+                        "message": "insufficient permissions to create_collections [Articles]"
+                    }
+                ]
+            },
+        )
+    )
+    with pytest.raises(InsufficientPermissionsError) as exc_info:
+        manager.create_collection(spec)
+    assert "create_collections" in str(exc_info.value)
+
+    # --if-not-exists still succeeds idempotently on 422 already-exists after 403 exists.
+    resp = httpx.Response(
+        422, json={"error": [{"message": "class Articles already exists"}]}
+    )
+    mock_collections.create_from_dict.side_effect = UnexpectedStatusCodeError(
+        "Collection may not have been created properly.", resp
+    )
+    res_skip = manager.create_collection(spec, if_not_exists=True)
+    assert res_skip == {
+        "collection": "Articles",
+        "created": False,
+        "already_exists": True,
+    }

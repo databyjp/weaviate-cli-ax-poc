@@ -14,6 +14,11 @@ from weaviate.collections import Collection
 from weaviate.collections.classes.config import _CollectionConfigSimple
 from weaviate.collections.classes.config_vector_index import VectorFilterStrategy
 from weaviate.collections.classes.tenants import TenantActivityStatus
+from weaviate.exceptions import (
+    InsufficientPermissionsError,
+    MissingScopeError,
+    UnexpectedStatusCodeError,
+)
 
 from weaviate_cli.defaults import UpdateCollectionDefaults
 from weaviate_cli.errors import CLIError, ExitCode, ValidationIssue
@@ -531,7 +536,19 @@ class CollectionManager:
                 exit_code=ExitCode.USAGE,
             )
 
-        if self.client.collections.exists(collection):
+        try:
+            exists = self.client.collections.exists(collection)
+        except (InsufficientPermissionsError, MissingScopeError):
+            # Caller may lack read_collections (either create-only RBAC or unauthorized).
+            # Fall through to create_from_dict so the server evaluates create_collections.
+            exists = False
+        except UnexpectedStatusCodeError as exc:
+            if getattr(exc, "status_code", None) == 403:
+                exists = False
+            else:
+                raise
+
+        if exists:
             if if_not_exists:
                 return {
                     "collection": collection,
@@ -548,7 +565,20 @@ class CollectionManager:
                 ),
             )
 
-        self.client.collections.create_from_dict(spec)
+        try:
+            self.client.collections.create_from_dict(spec)
+        except UnexpectedStatusCodeError as exc:
+            if (
+                if_not_exists
+                and getattr(exc, "status_code", None) in (409, 422)
+                and "already exists" in str(exc).lower()
+            ):
+                return {
+                    "collection": collection,
+                    "created": False,
+                    "already_exists": True,
+                }
+            raise
         return {
             "collection": collection,
             "created": True,

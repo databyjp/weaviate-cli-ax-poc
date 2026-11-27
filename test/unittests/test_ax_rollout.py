@@ -204,3 +204,62 @@ def test_replication_list_and_export_get_json_envelopes(cli_runner: CliRunner):
     assert exp_payload["data"]["export_id"] == "exp-1"
     assert exp_payload["data"]["status"] == "SUCCESS"
     assert exp_payload["metadata"]["command"] == "export get"
+
+
+def test_node_list_allows_shards_with_collection_and_rejects_minimal_conflict(
+    cli_runner,
+):
+    from unittest.mock import MagicMock, patch
+
+    mock_client = MagicMock()
+    with (
+        patch(
+            "weaviate_cli.commands.node.get_client_from_context",
+            return_value=mock_client,
+        ),
+        patch("weaviate_cli.commands.node.NodeManager") as mock_nm_cls,
+    ):
+        ok_res = cli_runner.invoke(
+            main, ["node", "list", "--shards", "--collection", "Articles"]
+        )
+        bad_res = cli_runner.invoke(
+            main, ["node", "list", "--minimal", "--collection", "Articles"]
+        )
+
+    assert ok_res.exit_code == 0, ok_res.stderr
+    mock_nm_cls.return_value.get_nodes.assert_called_once_with(
+        minimal=False,
+        shards=True,
+        collections=False,
+        collection="Articles",
+        shard=None,
+        json_output=True,
+    )
+    assert bad_res.exit_code == 2
+    assert json.loads(bad_res.stdout)["error"]["code"] == "CONFLICTING_OPTIONS"
+
+
+def test_shard_state_501_returns_helpful_hint(cli_runner):
+    from unittest.mock import MagicMock, patch
+
+    import httpx
+    from weaviate.exceptions import UnexpectedStatusCodeError
+
+    mock_client = MagicMock()
+    resp_501 = httpx.Response(501, json={"error": [{"message": "Not Implemented"}]})
+    err_501 = UnexpectedStatusCodeError("Query sharding state", resp_501)
+
+    with (
+        patch(
+            "weaviate_cli.commands.shard.get_client_from_context",
+            return_value=mock_client,
+        ),
+        patch("weaviate_cli.commands.shard.ClusterManager") as mock_cm_cls,
+    ):
+        mock_cm_cls.return_value.query_sharding_state.side_effect = err_501
+        res = cli_runner.invoke(main, ["shard", "state", "Articles"])
+
+    assert res.exit_code == 1
+    payload = json.loads(res.stdout)
+    assert payload["error"]["code"] == "SHARDING_STATE_UNSUPPORTED"
+    assert "shard list --collection Articles" in payload["error"]["hint"]

@@ -343,3 +343,32 @@ def test_mcp_config_cursor_streamable_http_and_claude_desktop_proxy(
     assert "which mcp-proxy" in desktop_text_res.stdout
     assert "mcp-proxy" in guide_res.stdout
     assert "which mcp-proxy" in guide_res.stdout
+
+
+def test_mcp_config_raw_emits_bare_json_and_rejects_explicit_json(cli_runner, tmp_path):
+    with patch.dict(
+        "os.environ",
+        {
+            "HOME": str(tmp_path),
+            "WEAVIATE_URL": "http://127.0.0.1:18080",
+            "WEAVIATE_API_KEY": "raw-secret",
+        },
+        clear=True,
+    ):
+        raw_res = cli_runner.invoke(
+            main, ["mcp", "config", "--client", "claude-code", "--raw"]
+        )
+        conflict_res = cli_runner.invoke(
+            main, ["mcp", "config", "--client", "claude-code", "--raw", "--json"]
+        )
+
+    assert raw_res.exit_code == 0, raw_res.stderr
+    parsed = json.loads(raw_res.stdout)
+    assert list(parsed.keys()) == ["mcpServers"]
+    assert parsed["mcpServers"]["weaviate"]["url"] == "http://127.0.0.1:18080/v1/mcp"
+    assert "raw-secret" not in raw_res.stdout
+    assert "Endpoint:" not in raw_res.stdout
+
+    assert conflict_res.exit_code == 2
+    err = json.loads(conflict_res.stdout)["error"]
+    assert err["code"] == "CONFLICTING_OPTIONS"
