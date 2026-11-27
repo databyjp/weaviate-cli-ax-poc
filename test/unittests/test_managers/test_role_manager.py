@@ -206,3 +206,105 @@ def test_revoke_permission_error(role_manager, mock_client):
             )
 
     assert "Error revoking permission" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# role_to_dict & print_role
+# ---------------------------------------------------------------------------
+
+
+def test_role_to_dict_and_print_role_include_mcp_groups_replicate_tenant_data(
+    role_manager, capsys
+):
+    from weaviate.rbac.models import (
+        BackupsAction,
+        BackupsPermissionOutput,
+        DataAction,
+        DataPermissionOutput,
+        GroupAction,
+        GroupsPermissionOutput,
+        MCPAction,
+        MCPPermissionOutput,
+        ReplicateAction,
+        ReplicatePermissionOutput,
+        Role,
+    )
+
+    role = Role(
+        name="mcp-ops",
+        alias_permissions=[],
+        cluster_permissions=[],
+        collections_permissions=[],
+        data_permissions=[
+            DataPermissionOutput(
+                collection="Articles",
+                tenant="tenant-a",
+                actions={DataAction.READ},
+            )
+        ],
+        roles_permissions=[],
+        users_permissions=[],
+        backups_permissions=[
+            BackupsPermissionOutput(
+                collection="Articles",
+                actions={BackupsAction.READ},
+            )
+        ],
+        mcp_permissions=[
+            MCPPermissionOutput(
+                actions={MCPAction.READ, MCPAction.CREATE, MCPAction.UPDATE}
+            )
+        ],
+        nodes_permissions=[],
+        tenants_permissions=[],
+        replicate_permissions=[
+            ReplicatePermissionOutput(
+                collection="Articles",
+                shard="shard-1",
+                actions={ReplicateAction.READ},
+            )
+        ],
+        groups_permissions=[
+            GroupsPermissionOutput(
+                group="engineering",
+                group_type="oidc",
+                actions={GroupAction.READ, GroupAction.ASSIGN_AND_REVOKE},
+            )
+        ],
+    )
+
+    as_dict = RoleManager.role_to_dict(role)
+    assert as_dict["name"] == "mcp-ops"
+    assert as_dict["permissions"]["data"] == [
+        {"collection": "Articles", "tenant": "tenant-a", "actions": ["read_data"]}
+    ]
+    assert as_dict["permissions"]["backups"] == [
+        {"collection": "Articles", "actions": ["read_backups"]}
+    ]
+    assert as_dict["permissions"]["replicate"] == [
+        {
+            "collection": "Articles",
+            "shard": "shard-1",
+            "actions": ["read_replicate"],
+        }
+    ]
+    assert as_dict["permissions"]["mcp"] == [
+        {"actions": ["create_mcp", "read_mcp", "update_mcp"]}
+    ]
+    assert as_dict["permissions"]["groups"] == [
+        {
+            "group": "engineering",
+            "group_type": "oidc",
+            "actions": ["assign_and_revoke_groups", "read_groups"],
+        }
+    ]
+
+    role_manager.print_role(role)
+    out = capsys.readouterr().out
+    assert "Role: mcp-ops" in out
+    assert "Tenant: tenant-a" in out
+    assert "Shard: shard-1" in out
+    assert "MCP Permissions:" in out
+    assert "create_mcp, read_mcp, update_mcp" in out
+    assert "Groups Permissions:" in out
+    assert "Group: engineering (oidc)" in out

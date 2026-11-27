@@ -240,6 +240,7 @@ class RoleManager:
             role_data["permissions"]["data"] = [
                 {
                     "collection": str(p.collection),
+                    "tenant": str(p.tenant),
                     "actions": [a.value for a in p.actions],
                 }
                 for p in role.data_permissions
@@ -248,6 +249,7 @@ class RoleManager:
             role_data["permissions"]["replicate"] = [
                 {
                     "collection": str(p.collection),
+                    "shard": str(p.shard),
                     "actions": [a.value for a in p.actions],
                 }
                 for p in role.replicate_permissions
@@ -260,6 +262,20 @@ class RoleManager:
                     "actions": [a.value for a in p.actions],
                 }
                 for p in role.alias_permissions
+            ]
+        if getattr(role, "mcp_permissions", None):
+            role_data["permissions"]["mcp"] = [
+                {"actions": sorted(a.value for a in p.actions)}
+                for p in role.mcp_permissions
+            ]
+        if getattr(role, "groups_permissions", None):
+            role_data["permissions"]["groups"] = [
+                {
+                    "group": str(p.group),
+                    "group_type": str(p.group_type),
+                    "actions": sorted(a.value for a in p.actions),
+                }
+                for p in role.groups_permissions
             ]
         return role_data
 
@@ -323,14 +339,14 @@ class RoleManager:
             print("\nData Permissions:")
             for perm in role.data_permissions:
                 print(
-                    f"  - Collection: {perm.collection}, Action: {', '.join([action.value for action in perm.actions])}"
+                    f"  - Collection: {perm.collection}, Tenant: {perm.tenant}, Action: {', '.join([action.value for action in perm.actions])}"
                 )
 
         if role.replicate_permissions:
             print("\nReplicate Permissions:")
             for perm in role.replicate_permissions:
                 print(
-                    f"  - Collection: {perm.collection}, Action: {', '.join([action.value for action in perm.actions])}"
+                    f"  - Collection: {perm.collection}, Shard: {perm.shard}, Action: {', '.join([action.value for action in perm.actions])}"
                 )
 
         if role.alias_permissions:
@@ -338,4 +354,18 @@ class RoleManager:
             for perm in role.alias_permissions:
                 print(
                     f"  - Collection: {perm.collection}, Alias: {perm.alias}, Action: {', '.join([action.value for action in perm.actions])}"
+                )
+
+        if getattr(role, "mcp_permissions", None):
+            print("\nMCP Permissions:")
+            for perm in role.mcp_permissions:
+                print(
+                    f"  - Action: {', '.join(sorted(action.value for action in perm.actions))}"
+                )
+
+        if getattr(role, "groups_permissions", None):
+            print("\nGroups Permissions:")
+            for perm in role.groups_permissions:
+                print(
+                    f"  - Group: {perm.group} ({perm.group_type}), Action: {', '.join(sorted(action.value for action in perm.actions))}"
                 )

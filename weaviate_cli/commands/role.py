@@ -33,8 +33,9 @@ def role_group() -> None:
     epilog=(
         "\b\n"
         "Examples:\n"
-        "  weaviate-cli role create reader -p read_collections:* -p read_data:*\n"
-        "  weaviate-cli role create articles-rw -p crud_data:Articles"
+        "  weaviate-cli role create reader -p 'read_collections:*' -p 'read_data:*'\n"
+        "  weaviate-cli role create mcp-agent -p read_mcp -p 'read_collections:Articles' -p 'read_data:Articles:tenant-a'\n"
+        "  weaviate-cli role create ops-backup -p 'read_backups:*' -p 'crud_replicate:Articles:*'"
     ),
 )
 @click.argument("role_name", shell_complete=role_name_complete)

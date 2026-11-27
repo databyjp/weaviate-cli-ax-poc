@@ -179,20 +179,22 @@ def warn_removed_async_replication_keys(
 def parse_permission(perm: str) -> PermissionsCreateType:
     """
     Convert a permission string to RBAC permission object(s).
-    Format: action:[collection/user/role/verbosity]
+    Format: action[:target[:subtarget]]
 
     Supports:
-    - CRUD shorthand: crud_collections:Movies
-    - Partial CRUD: cr_collections:Movies (create+read)
-    - Role permissions: read_roles, update_roles, delete_roles, create_roles
+    - CRUD shorthand: crud_collections:Articles, cr_data:Articles:tenant-a
+    - Role permissions: create_roles, read_roles, update_roles, delete_roles[:role[:all|match]]
     - Cluster permissions: read_cluster
-    - Backup permissions: manage_backups
-    - Collections permissions: create_collections, read_collections, update_collections, delete_collections
-    - Tenants permissions: create_tenants, read_tenants, update_tenants, delete_tenants
-    - Data permissions: create_data, read_data, update_data, delete_data
-    - Users permissions: create_users, read_users, update_users, delete_users, assign_and_revoke_users
-    - Nodes permissions: read_nodes
-    - Aliases permissions: create_aliases, read_aliases, update_aliases, delete_aliases
+    - Backup permissions: manage_backups[:collection], read_backups[:collection]
+    - Collections permissions: create_collections, read_collections, update_collections, delete_collections[:collection]
+    - Tenants permissions: create_tenants, read_tenants, update_tenants, delete_tenants[:collection[:tenant]]
+    - Data permissions: create_data, read_data, update_data, delete_data[:collection[:tenant]]
+    - Users permissions: create_users, read_users, update_users, delete_users, assign_and_revoke_users[:user]
+    - Groups (OIDC) permissions: read_groups, assign_and_revoke_groups[:group[:oidc]]
+    - Nodes permissions: read_nodes[:minimal|verbose[:collection]]
+    - Aliases permissions: create_aliases, read_aliases, update_aliases, delete_aliases[:collection[:alias]]
+    - Replicate permissions: create_replicate, read_replicate, update_replicate, delete_replicate[:collection[:shard]]
+    - MCP permissions: create_mcp, read_mcp, update_mcp (or c/r/u shorthands like cru_mcp)
     Args:
         perm (str): Permission string
 
@@ -205,30 +207,79 @@ def parse_permission(perm: str) -> PermissionsCreateType:
         "roles",
         "tenants",
         "users",
+        "groups",
         "cluster",
         "backups",
         "nodes",
         "aliases",
+        "replicate",
+        "mcp",
     ]
-    crud_resources = ["collections", "data", "tenants", "roles", "users", "aliases"]
+    crud_resources = [
+        "collections",
+        "data",
+        "tenants",
+        "roles",
+        "users",
+        "aliases",
+        "replicate",
+    ]
+    three_part_resources = {
+        "roles",
+        "tenants",
+        "aliases",
+        "data",
+        "replicate",
+        "groups",
+    }
     parts = perm.split(":")
-    # Only read_nodes  and *_roles, *_tenants, *_aliases can have 3 parts: read_nodes:verbosity:collection, read_roles:role:scope, read_tenants:collection:tenant, read_aliases:collection:alias
-    if len(parts) > 3 or (
-        (
-            parts[0].split("_")[-1] not in ["roles", "tenants", "aliases"]
-            and parts[0] not in ["read_nodes"]
+    action = parts[0]
+    action_resource = action.split("_")[-1]
+
+    if action_resource == "mcp" and len(parts) > 1:
+        raise ValueError(
+            f"Invalid permission format: {perm}. MCP permissions do not accept a target subfield; "
+            "use e.g. 'read_mcp', 'create_mcp', 'update_mcp', or 'cru_mcp'."
         )
+    if action == "read_cluster" and len(parts) > 1:
+        raise ValueError(
+            f"Invalid permission format: {perm}. 'read_cluster' does not accept a target subfield."
+        )
+
+    if len(parts) > 3 or (
+        (action_resource not in three_part_resources and action != "read_nodes")
         and len(parts) > 2
     ):
         raise ValueError(
-            f"Invalid permission format: {perm}. Expected format: action:collection/role/user/verbosity:scope/tenant/alias. Example: create_roles:custom:all, crud_collections:Movies, crud_aliases:Movies, create_users:admin-user, read_nodes:verbose:Movies, read_tenants:Movies:tenant1, read_aliases:Movies:alias1"
+            f"Invalid permission format: {perm}. Expected format: "
+            "action[:collection/role/user/group/verbosity[:scope/tenant/alias/shard]]. "
+            "Examples: create_roles:custom:all, crud_collections:Articles, "
+            "read_data:Articles:tenant1, crud_replicate:Articles:shard1, "
+            "read_groups:admins, read_backups:Articles, cru_mcp, "
+            "read_nodes:verbose:Articles, read_tenants:Articles:tenant1, "
+            "read_aliases:Articles:alias1"
         )
-    action = parts[0]
-    role = parts[1] if len(parts) > 1 and "roles" in action else "*"
-    role_scope = parts[2] if len(parts) > 2 and "roles" in action else None
-    tenant = parts[2].split(",") if len(parts) > 2 and "tenants" in action else None
-    alias = parts[2].split(",") if len(parts) > 2 and "aliases" in action else "*"
-    user = parts[1].split(",") if len(parts) > 1 and "users" in action else "*"
+
+    role = parts[1] if len(parts) > 1 and action_resource == "roles" else "*"
+    role_scope = parts[2] if len(parts) > 2 and action_resource == "roles" else None
+    tenant = (
+        parts[2].split(",")
+        if len(parts) > 2 and action_resource in {"tenants", "data"}
+        else None
+    )
+    shard = (
+        parts[2].split(",")
+        if len(parts) > 2 and action_resource == "replicate"
+        else None
+    )
+    alias = (
+        parts[2].split(",") if len(parts) > 2 and action_resource == "aliases" else "*"
+    )
+    user = parts[1].split(",") if len(parts) > 1 and action_resource == "users" else "*"
+    group = (
+        parts[1].split(",") if len(parts) > 1 and action_resource == "groups" else "*"
+    )
+    group_type = parts[2] if len(parts) > 2 and action_resource == "groups" else "oidc"
 
     verbosity = "minimal"
     if action == "read_nodes":
@@ -239,11 +290,10 @@ def parse_permission(perm: str) -> PermissionsCreateType:
             verbosity = parts[1] if parts[1] == "verbose" else "minimal"
         collection = parts[2] if len(parts) > 2 else "*"
     else:
-        # Handle all other actions
-        role_actions = ["update_roles", "delete_roles", "create_roles", "read_roles"]
+        non_collection_resources = {"roles", "users", "groups", "cluster", "mcp"}
         collection = (
             parts[1]
-            if len(parts) > 1 and action not in role_actions + ["read_cluster"]
+            if len(parts) > 1 and action_resource not in non_collection_resources
             else "*"
         )
 
@@ -255,26 +305,48 @@ def parse_permission(perm: str) -> PermissionsCreateType:
     if action in [
         "read_cluster",
         "manage_backups",
+        "read_backups",
         "read_nodes",
         "assign_and_revoke_users",
+        "read_groups",
+        "assign_and_revoke_groups",
     ]:
+        if action in {"assign_and_revoke_users", "assign_and_revoke_groups"}:
+            standalone_action = "assign_and_revoke"
+        else:
+            standalone_action = action.split("_")[0]
         return _create_permission(
-            action=(
-                action.split("_")[0]
-                if action != "assign_and_revoke_users"
-                else "assign_and_revoke"
-            ),
-            resource=action.split("_")[-1],
+            action=standalone_action,
+            resource=action_resource,
             user=user,
+            group=group,
+            group_type=group_type,
             collection=collection,
             verbosity=verbosity,
         )
 
+    # Handle MCP permissions (create, read, update; no delete)
+    if "_" in action and action_resource == "mcp":
+        prefix = action.rsplit("_", 1)[0]
+        mcp_action_map = {"c": "create", "r": "read", "u": "update"}
+        if prefix in ["create", "read", "update"]:
+            mcp_actions = [prefix]
+        elif prefix == "delete" or "d" in prefix:
+            raise ValueError(
+                f"Invalid MCP permission action: {action}. "
+                "MCP permissions support only 'create', 'read', and 'update' (e.g. read_mcp, cru_mcp)."
+            )
+        elif prefix and all(c in mcp_action_map for c in prefix):
+            mcp_actions = [mcp_action_map[c] for c in prefix]
+        else:
+            raise ValueError(f"Invalid MCP permission combination: {prefix}")
+        return _create_permission(action=mcp_actions, resource="mcp")
+
     # Handle crud and partial crud cases
     if "_" in action:
-        parts = action.split("_", 2)
-        prefix = parts[0]
-        resource = parts[1] if len(parts) > 1 else None
+        action_parts = action.split("_", 2)
+        prefix = action_parts[0]
+        resource = action_parts[1] if len(action_parts) > 1 else None
         if resource in crud_resources:
             if resource not in valid_resources:
                 # Find closest matching resource type
@@ -304,6 +376,7 @@ def parse_permission(perm: str) -> PermissionsCreateType:
                 resource=resource,
                 collection=collection,
                 tenant=tenant if tenant is not None else "*",
+                shard=shard if shard is not None else "*",
                 alias=alias,
                 role=role,
                 role_scope=role_scope,
@@ -319,25 +392,46 @@ def _create_permission(
     role: str | Sequence[str] = "*",
     role_scope: str | None = None,
     user: str | Sequence[str] = "*",
+    group: str | Sequence[str] = "*",
+    group_type: str = "oidc",
     collection: str | Sequence[str] = "*",
     tenant: str | Sequence[str] = "*",
+    shard: str | Sequence[str] = "*",
     alias: str | Sequence[str] = "*",
     verbosity: str = "minimal",
 ) -> PermissionsCreateType:
     """Helper function to create individual RBAC permission objects."""
+    action_set = {action} if isinstance(action, str) else set(action)
 
     # Handle standalone permissions
-    # if action == "manage_users":
-    #     return Permissions.users(manage=True)
     if resource == "cluster":
         return Permissions.cluster(read=True)
     elif resource == "backups":
-        return Permissions.backup(manage=True, collection=collection)
+        return Permissions.backup(
+            collection=collection,
+            read=("read" in action_set),
+            manage=("manage" in action_set),
+        )
+    elif resource == "mcp":
+        return Permissions.mcp(
+            create=("create" in action_set),
+            read=("read" in action_set),
+            update=("update" in action_set),
+        )
+    elif resource == "groups":
+        if group_type != "oidc":
+            raise ValueError(f"Unsupported group type '{group_type}'. Expected 'oidc'.")
+        return Permissions.Groups.oidc(
+            group=group,
+            read=("read" in action_set),
+            assign_and_revoke=("assign_and_revoke" in action_set),
+        )
     elif resource == "nodes":
         if verbosity == "minimal":
-            if collection != "*":
-                print(
-                    f"WARNING: Collection is not supported for minimal verbosity. Ignoring collection: {collection}"
+            if collection not in ("*", ["*"]):
+                click.echo(
+                    f"Warning: Collection is not supported for minimal verbosity. Ignoring collection: {collection}",
+                    err=True,
                 )
             return Permissions.Nodes.minimal(read=True)
         else:
@@ -345,11 +439,11 @@ def _create_permission(
     elif resource == "users":
         return Permissions.users(
             user=user,
-            create=("create" in action),
-            read=("read" in action),
-            update=("update" in action),
-            delete=("delete" in action),
-            assign_and_revoke=("assign_and_revoke" in action),
+            create=("create" in action_set),
+            read=("read" in action_set),
+            update=("update" in action_set),
+            delete=("delete" in action_set),
+            assign_and_revoke=("assign_and_revoke" in action_set),
         )
     # Handle roles permissions
     elif resource == "roles":
@@ -367,10 +461,10 @@ def _create_permission(
 
         return Permissions.roles(
             role=role,
-            read=("read" in action),
-            update=("update" in action),
-            delete=("delete" in action),
-            create=("create" in action),
+            read=("read" in action_set),
+            update=("update" in action_set),
+            delete=("delete" in action_set),
+            create=("create" in action_set),
             scope=scope,
         )
 
@@ -378,20 +472,21 @@ def _create_permission(
     elif resource == "collections":
         return Permissions.collections(
             collection=collection,
-            create_collection=("create" in action),
-            read_config=("read" in action),
-            update_config=("update" in action),
-            delete_collection=("delete" in action),
+            create_collection=("create" in action_set),
+            read_config=("read" in action_set),
+            update_config=("update" in action_set),
+            delete_collection=("delete" in action_set),
         )
 
     # Handle data permissions
     elif resource == "data":
         return Permissions.data(
             collection=collection,
-            create=("create" in action),
-            read=("read" in action),
-            update=("update" in action),
-            delete=("delete" in action),
+            tenant=tenant,
+            create=("create" in action_set),
+            read=("read" in action_set),
+            update=("update" in action_set),
+            delete=("delete" in action_set),
         )
 
     # Handle tenants permissions
@@ -399,20 +494,30 @@ def _create_permission(
         return Permissions.tenants(
             tenant=tenant,
             collection=collection,
-            create=("create" in action),
-            read=("read" in action),
-            update=("update" in action),
-            delete=("delete" in action),
+            create=("create" in action_set),
+            read=("read" in action_set),
+            update=("update" in action_set),
+            delete=("delete" in action_set),
         )
     # Handle aliases permissions
     elif resource == "aliases":
         return Permissions.alias(
             alias=alias,
             collection=collection,
-            create=("create" in action),
-            read=("read" in action),
-            update=("update" in action),
-            delete=("delete" in action),
+            create=("create" in action_set),
+            read=("read" in action_set),
+            update=("update" in action_set),
+            delete=("delete" in action_set),
+        )
+    # Handle replication permissions
+    elif resource == "replicate":
+        return Permissions.replicate(
+            collection=collection,
+            shard=shard,
+            create=("create" in action_set),
+            read=("read" in action_set),
+            update=("update" in action_set),
+            delete=("delete" in action_set),
         )
     raise ValueError(f"Invalid permission action: {action}.")
 
