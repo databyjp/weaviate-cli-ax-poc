@@ -367,6 +367,12 @@ def revoke_role_cli(
             client.close()
 
 
+_SHORT_PERMISSION_HELP = (
+    "Permission in format action[:target[:subtarget]] (repeatable; "
+    "see 'weaviate-cli role create -h' or 'weaviate-cli guide role' for all permissions and shorthands)."
+)
+
+
 @role_group.command("add-permission", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("role_name", shell_complete=role_name_complete)
 @click.option(
@@ -374,7 +380,7 @@ def revoke_role_cli(
     "--permission",
     multiple=True,
     required=True,
-    help=PERMISSION_HELP_STRING,
+    help=_SHORT_PERMISSION_HELP,
 )
 @click.option(
     "--json/--no-json",
@@ -417,7 +423,7 @@ def add_permission_cli(
     "--permission",
     multiple=True,
     required=True,
-    help=PERMISSION_HELP_STRING,
+    help=_SHORT_PERMISSION_HELP,
 )
 @click.option(
     "--json/--no-json",

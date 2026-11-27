@@ -82,6 +82,39 @@ def test_classify_unexpected_status_codes(status_code, expected_exit, expected_c
     assert classified.code == expected_code
 
 
+def test_classify_429_usage_limit_and_cloud_backup_403_hints():
+    usage_resp = httpx.Response(
+        429, json={"error": [{"message": "USAGE_LIMIT_EXCEEDED: max collections"}]}
+    )
+    usage_err = classify_exception(
+        UnexpectedStatusCodeError("Create collection", usage_resp),
+        target="https://demo.c0.eu-central-1.aws.weaviate.cloud",
+    )
+    assert usage_err.code == "USAGE_LIMIT_EXCEEDED"
+    assert usage_err.exit_code == ExitCode.RUNTIME
+    assert usage_err.hint and "1 collection" in usage_err.hint
+
+    rate_resp = httpx.Response(429, json={"error": [{"message": "too many requests"}]})
+    rate_err = classify_exception(
+        UnexpectedStatusCodeError("Request", rate_resp),
+        target="localhost:8080",
+    )
+    assert rate_err.code == "RATE_LIMITED"
+    assert rate_err.hint and "rate-limited" in rate_err.hint
+
+    backup_403 = classify_exception(
+        InsufficientPermissionsError(
+            httpx.Response(
+                403, json={"error": [{"message": "forbidden backup create"}]}
+            )
+        ),
+        target="https://demo.c0.eu-central-1.aws.weaviate.cloud",
+    )
+    assert backup_403.code == "FORBIDDEN"
+    assert backup_403.exit_code == ExitCode.AUTH
+    assert backup_403.hint and "free-tier" in backup_403.hint
+
+
 def test_emit_success_json_envelope_and_stderr_warnings(capsys):
     runtime = RuntimeContext(json_output=True)
     emit_warning(runtime, "deprecated option")

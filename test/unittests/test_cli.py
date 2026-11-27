@@ -332,15 +332,49 @@ def test_collection_delete_all_requires_yes(cli_runner):
     mock_config.get_client.return_value = mock_client
 
     with patch("cli.ConfigManager", return_value=mock_config):
+        blocked_single = cli_runner.invoke(main, ["collection", "delete", "A"])
+        assert blocked_single.exit_code == 2
+        assert (
+            json.loads(blocked_single.stdout)["error"]["code"]
+            == "CONFIRMATION_REQUIRED"
+        )
+        mock_client.collections.delete.assert_not_called()
+
+        allowed_single = cli_runner.invoke(main, ["collection", "delete", "A", "--yes"])
+        assert allowed_single.exit_code == 0, allowed_single.stdout
+        assert json.loads(allowed_single.stdout)["data"] == {
+            "deleted": ["A"],
+            "count": 1,
+        }
+
         blocked = cli_runner.invoke(main, ["collection", "delete", "--all"])
         assert blocked.exit_code == 2
         payload = json.loads(blocked.stdout)
         assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
-        mock_client.collections.delete.assert_not_called()
 
         allowed = cli_runner.invoke(main, ["collection", "delete", "--all", "--yes"])
         assert allowed.exit_code == 0, allowed.stdout
         assert json.loads(allowed.stdout)["data"] == {"deleted": ["A", "B"], "count": 2}
+
+
+def test_guide_role_does_not_repeat_full_permission_help(cli_runner):
+    result = cli_runner.invoke(main, ["guide", "role"])
+    assert result.exit_code == 0
+    assert result.stdout.count("Available Permissions:") == 1
+
+
+def test_rbac001_user_warning_is_filtered():
+    import warnings
+
+    from weaviate.warnings import _Warnings
+
+    from cli import configure_warning_filters
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        configure_warning_filters()
+        _Warnings.unknown_permission_encountered({"action": "manage_namespaces"})
+    assert caught == []
 
 
 def test_collection_list_connection_error_exit_code_5(cli_runner):

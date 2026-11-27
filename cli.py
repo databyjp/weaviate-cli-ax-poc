@@ -1,26 +1,37 @@
 import warnings
 
-warnings.filterwarnings(
-    "ignore", message="pkg_resources is deprecated as an API.", category=UserWarning
-)
-warnings.filterwarnings(
-    "ignore",
-    message=(
-        r"Protobuf gencode version [\d\.]+ is exactly one major version older than the runtime version [\d\.]+ at v1/tenants\.proto\. "
-        r"Please update the gencode to avoid compatibility violations in the next runtime release\."
-    ),
-    category=UserWarning,
-)
 
-# authlib.deprecate calls warnings.simplefilter("always", AuthlibDeprecationWarning)
-# at import time; import it first so our ignore filter takes precedence before
-# weaviate imports authlib.integrations.httpx_client.
-try:
-    from authlib.deprecate import AuthlibDeprecationWarning
+def configure_warning_filters() -> None:
+    """Suppress noisy third-party/SDK warnings that would pollute stderr."""
+    warnings.filterwarnings(
+        "ignore", message="pkg_resources is deprecated as an API.", category=UserWarning
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=(
+            r"Protobuf gencode version [\d\.]+ is exactly one major version older than the runtime version [\d\.]+ at v1/tenants\.proto\. "
+            r"Please update the gencode to avoid compatibility violations in the next runtime release\."
+        ),
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"RBAC001: Unknown permission .*",
+        category=UserWarning,
+    )
 
-    warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
-except ImportError:
-    pass
+    # authlib.deprecate calls warnings.simplefilter("always", AuthlibDeprecationWarning)
+    # at import time; import it first so our ignore filter takes precedence before
+    # weaviate imports authlib.integrations.httpx_client.
+    try:
+        from authlib.deprecate import AuthlibDeprecationWarning
+
+        warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
+    except ImportError:
+        pass
+
+
+configure_warning_filters()
 
 import click
 

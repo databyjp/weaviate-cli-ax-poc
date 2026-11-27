@@ -58,11 +58,11 @@ class TenantManager:
             )
 
         tenant_state_map = {
-            "hot": TenantActivityStatus.HOT,
+            "hot": TenantActivityStatus.ACTIVE,
             "active": TenantActivityStatus.ACTIVE,
-            "cold": TenantActivityStatus.COLD,
+            "cold": TenantActivityStatus.INACTIVE,
             "inactive": TenantActivityStatus.INACTIVE,
-            "frozen": TenantActivityStatus.FROZEN,
+            "frozen": TenantActivityStatus.OFFLOADED,
             "offloaded": TenantActivityStatus.OFFLOADED,
         }
 
@@ -119,19 +119,20 @@ class TenantManager:
             expected_status=tenant_state_map[state],
         )
 
+        status_label = tenant_state_map[state].value
         if json_output:
             click.echo(
                 json.dumps(
                     {
                         "status": "success",
                         "tenants_created": len(new_tenant_names),
-                        "message": f"{len(new_tenant_names)} tenants added with status '{tenant_state_map[state]}' for collection '{col.name}'",
+                        "message": f"{len(new_tenant_names)} tenants added with status '{status_label}' for collection '{col.name}'",
                     }
                 )
             )
         else:
             click.echo(
-                f"{len(new_tenant_names)} tenants added with status '{tenant_state_map[state]}' for collection '{col.name}'"
+                f"{len(new_tenant_names)} tenants added with status '{status_label}' for collection '{col.name}'"
             )
 
     def _resolve_tenant_names_to_create(
@@ -197,7 +198,7 @@ class TenantManager:
         for tenant_name, tenant in created_tenants.items():
             if tenant.activity_status != expected_status:
                 raise Exception(
-                    f"Tenant '{tenant_name}' has status '{tenant.activity_status}', expected '{expected_status}'"
+                    f"Tenant '{tenant_name}' has status '{tenant.activity_status.value}', expected '{expected_status.value}'"
                 )
 
     def delete_tenants(
@@ -388,6 +389,16 @@ class TenantManager:
             click.echo(
                 f"{len(tenants):<20}{len(inactive_tenants):<20}{len(active_tenants):<20}{len(offoaded_tenants):<20}"
             )
+            if tenants:
+                max_preview = 20
+                items = list(tenants.items())
+                preview = ", ".join(
+                    f"{name} ({t.activity_status.value})"
+                    for name, t in items[:max_preview]
+                )
+                if len(items) > max_preview:
+                    preview += f", ... (+{len(items) - max_preview} more; use --verbose or --json)"
+                click.echo(f"Tenants: {preview}")
         return tenants
 
     def update_tenants(
@@ -426,11 +437,11 @@ class TenantManager:
             )
 
         tenant_state_map = {
-            "hot": TenantActivityStatus.HOT,
+            "hot": TenantActivityStatus.ACTIVE,
             "active": TenantActivityStatus.ACTIVE,
-            "cold": TenantActivityStatus.COLD,
+            "cold": TenantActivityStatus.INACTIVE,
             "inactive": TenantActivityStatus.INACTIVE,
-            "frozen": TenantActivityStatus.FROZEN,
+            "frozen": TenantActivityStatus.OFFLOADED,
             "offloaded": TenantActivityStatus.OFFLOADED,
         }
 
@@ -507,20 +518,21 @@ class TenantManager:
             last_status = tenant.activity_status
             if tenant.activity_status != equivalent_state_map[state]:
                 raise Exception(
-                    f"Tenant '{tenant.name}' has activity status '{tenant.activity_status}', but expected '{tenant_state_map[state]}'"
+                    f"Tenant '{tenant.name}' has activity status '{tenant.activity_status.value}', but expected '{equivalent_state_map[state].value}'"
                 )
+        status_label = last_status.value
         if json_output:
             click.echo(
                 json.dumps(
                     {
                         "status": "success",
                         "tenants_updated": len(tenants_list),
-                        "message": f"{len(tenants_list)} tenants updated with tenant status '{last_status}' for class '{col.name}'.",
+                        "message": f"{len(tenants_list)} tenants updated with tenant status '{status_label}' for class '{col.name}'.",
                     },
                     indent=2,
                 )
             )
         else:
             click.echo(
-                f"{len(tenants_list)} tenants updated with tenant status '{last_status}' for class '{col.name}'."
+                f"{len(tenants_list)} tenants updated with tenant status '{status_label}' for class '{col.name}'."
             )

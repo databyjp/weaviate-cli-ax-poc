@@ -142,6 +142,8 @@ def test_tenant_list_and_not_found_contracts(cli_runner: CliRunner):
 @pytest.mark.parametrize(
     "argv",
     [
+        ["collection", "delete", "Articles"],
+        ["collection", "delete", "--all"],
         ["role", "delete", "viewer"],
         ["user", "delete", "temp-user"],
         ["backup", "restore", "bk-1", "--backend", "s3"],

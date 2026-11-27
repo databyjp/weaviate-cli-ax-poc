@@ -129,6 +129,8 @@ class TestCreateTenants:
         out = capsys.readouterr().out
         assert str(number_tenants) in out
         assert "tenants added" in out
+        assert "'ACTIVE'" in out
+        assert "TenantActivityStatus." not in out
 
     def test_happy_path_creates_n_tenants_from_zero_json_output(
         self, mock_client: MagicMock, capsys
@@ -585,9 +587,13 @@ class TestGetTenants:
         )
 
         out = capsys.readouterr().out
-        # Summary header and data row should both be present
+        # Summary header, data row, and compact tenant preview should be present
         assert "Number Tenants" in out
         assert "3" in out
+        assert "Tenants:" in out
+        assert "Tenant-0 (ACTIVE)" in out
+        assert "Tenant-1 (INACTIVE)" in out
+        assert "Tenant-2 (OFFLOADED)" in out
 
     def test_with_tenant_id_found(self, mock_client: MagicMock, capsys) -> None:
         """get_tenants returns the single tenant when tenant_id is given and found."""
@@ -747,6 +753,8 @@ class TestUpdateTenants:
         out = capsys.readouterr().out
         assert "1" in out
         assert "updated" in out
+        assert "'ACTIVE'" in out
+        assert "TenantActivityStatus." not in out
 
     def test_update_via_tenants_argument(self, mock_client: MagicMock, capsys) -> None:
         """

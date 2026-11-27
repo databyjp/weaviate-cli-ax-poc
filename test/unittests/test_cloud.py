@@ -698,3 +698,117 @@ def test_cloud_preflight_prevents_wcloud_call(
     if option:
         assert path.read_text() == original
         assert list(tmp_path.iterdir()) == [path]
+
+
+def test_cloud_free_tier_limits_attached_for_free_only_and_defers_to_wcloud(
+    cli_runner, tmp_path
+):
+    fake_bin = tmp_path / "wcloud"
+    fake_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_bin.chmod(0o755)
+
+    def runner(args: Sequence[str]) -> CommandResult:
+        if "whoami" in args:
+            return CommandResult(0, json.dumps({"data": {"email": "a@b.io"}}), "")
+        if "list" in args:
+            return CommandResult(
+                0,
+                json.dumps(
+                    {
+                        "data": [
+                            {"id": "c-free", "name": "free-1", "tier": "free"},
+                            {"id": "c-paid", "name": "paid-1", "tier": "serverless"},
+                            {
+                                "id": "c-native",
+                                "name": "free-native",
+                                "tier": "free",
+                                "limits": {"max_collections": 5},
+                            },
+                        ]
+                    }
+                ),
+                "",
+            )
+        if "create" in args:
+            return CommandResult(
+                0,
+                json.dumps(
+                    {
+                        "data": {
+                            "id": "c-free",
+                            "name": "free-1",
+                            "status": "READY",
+                            "tier": "free",
+                            "region": "eu-central-1",
+                            "endpoint": "https://demo.weaviate.cloud",
+                            "api_key": {"value": "secret-123"},
+                        }
+                    }
+                ),
+                "",
+            )
+        return CommandResult(0, json.dumps({"data": {}}), "")
+
+    mgr = CloudManager(
+        env={"WEAVIATE_WCLOUD_PATH": str(fake_bin)},
+        runner=runner,
+        is_interactive=False,
+    )
+    listed = mgr.list_clusters()
+    by_id = {c["id"]: c for c in listed["clusters"]}
+    assert by_id["c-free"]["tier_limits"]["max_collections"] == 1
+    assert by_id["c-free"]["tier_limits"]["max_tenants_per_collection"] == 3
+    assert by_id["c-free"]["tier_limits"]["backups"] is False
+    assert "tier_limits" not in by_id["c-paid"]
+    # Native wcloud `limits` is preserved without injecting fallback `tier_limits`
+    assert by_id["c-native"]["limits"] == {"max_collections": 5}
+    assert "tier_limits" not in by_id["c-native"]
+
+    created = mgr.create_cluster(wait=True, include_key=True)
+    assert created["tier_limits"]["vector_index"] == "hfresh"
+    assert created["tier_limits"]["backups"] is False
+
+    # Help and guide surface free-tier limits offline
+    help_res = cli_runner.invoke(main, ["cloud", "create", "--help"])
+    assert help_res.exit_code == 0
+    normalized_help = " ".join(help_res.stdout.split())
+    assert "1 collection" in normalized_help
+    assert "no backups" in normalized_help
+
+    guide_res = cli_runner.invoke(main, ["guide", "cloud"])
+    assert guide_res.exit_code == 0
+    assert "Free-tier limits" in guide_res.stdout
+    assert "USAGE_LIMIT_EXCEEDED" in guide_res.stdout
+
+
+def test_wcloud_quota_exceeded_includes_console_hint(tmp_path):
+    fake_bin = tmp_path / "wcloud"
+    fake_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_bin.chmod(0o755)
+
+    def runner(args: Sequence[str]) -> CommandResult:
+        if "whoami" in args:
+            return CommandResult(0, json.dumps({"data": {"email": "a@b.io"}}), "")
+        return CommandResult(
+            7,
+            json.dumps(
+                {
+                    "error": {
+                        "code": "quota_exceeded",
+                        "message": "free cluster limit reached",
+                    }
+                }
+            ),
+            "",
+        )
+
+    mgr = CloudManager(
+        env={"WEAVIATE_WCLOUD_PATH": str(fake_bin)},
+        runner=runner,
+        is_interactive=False,
+    )
+    with pytest.raises(CLIError) as err:
+        mgr.create_cluster(wait=False)
+    assert err.value.code == "WCLOUD_QUOTA_EXCEEDED"
+    assert err.value.hint and "console.weaviate.cloud" in err.value.hint
+    assert "SUSPENDED" in err.value.hint

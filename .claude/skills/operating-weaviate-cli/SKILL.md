@@ -155,7 +155,7 @@ weaviate-cli --env-file .env.cloud mcp config --client claude-code --check
 weaviate-cli collection list
 weaviate-cli collection get Articles
 weaviate-cli collection update Articles --description "Knowledge base"
-weaviate-cli collection delete Articles
+weaviate-cli collection delete Articles --yes
 
 # Tenants require explicit names (states: hot/active, cold/inactive, frozen/offloaded)
 weaviate-cli tenant create tenant-a tenant-b --collection Articles --state active

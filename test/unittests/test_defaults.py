@@ -133,7 +133,13 @@ def test_delete_collection_defaults(runner):
     missing_result = runner.invoke(delete_collection_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(delete_collection_cli, ["TestCollection"], obj=ctx.obj)
+    # Deleting a collection requires --yes
+    unconfirmed = runner.invoke(delete_collection_cli, ["TestCollection"], obj=ctx.obj)
+    assert unconfirmed.exit_code == 2
+
+    result = runner.invoke(
+        delete_collection_cli, ["TestCollection", "--yes"], obj=ctx.obj
+    )
     assert result.exit_code == 0, result.output
     assert DeleteCollectionDefaults.collection is None
     assert DeleteCollectionDefaults.all is False

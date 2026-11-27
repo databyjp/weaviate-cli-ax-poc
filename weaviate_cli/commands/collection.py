@@ -584,7 +584,7 @@ def update_collection_cli(
     "--yes",
     is_flag=True,
     default=False,
-    help="Confirm destructive bulk deletion (required with --all).",
+    help="Confirm destructive collection deletion (required).",
 )
 @click.option(
     "--json/--no-json",
@@ -600,7 +600,7 @@ def delete_collection_cli(
     yes: bool,
     json_output: bool | None,
 ) -> None:
-    """Delete a collection (or all collections with --all --yes)."""
+    """Delete a collection or all collections (requires --yes)."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "collection delete"
 
@@ -621,18 +621,24 @@ def delete_collection_cli(
                 code="MISSING_COLLECTION_NAME",
                 message="Either NAME or --all must be specified.",
                 exit_code=ExitCode.USAGE,
-                hint="Example: 'weaviate-cli collection delete Articles' or 'weaviate-cli collection delete --all --yes'.",
+                hint="Example: 'weaviate-cli collection delete Articles --yes' or 'weaviate-cli collection delete --all --yes'.",
             ),
             command=command,
         )
-    if delete_all and not yes:
+    if not yes:
+        target_label = "all collections" if delete_all else f"collection '{name}'"
+        rerun_cmd = (
+            "weaviate-cli collection delete --all --yes"
+            if delete_all
+            else f"weaviate-cli collection delete {name} --yes"
+        )
         emit_error(
             runtime,
             CLIError(
                 code="CONFIRMATION_REQUIRED",
-                message="Deleting all collections is destructive and requires --yes.",
+                message=f"Deleting {target_label} is destructive and requires --yes.",
                 exit_code=ExitCode.USAGE,
-                hint="Re-run with 'weaviate-cli collection delete --all --yes' after confirming.",
+                hint=f"Re-run with '{rerun_cmd}' after confirming.",
             ),
             command=command,
         )
