@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from weaviate.exceptions import WeaviateConnectionError
 
 from cli import main
+from weaviate_cli.runtime import AXGroup
 
 
 @pytest.fixture
@@ -129,7 +130,7 @@ def test_main_noun_verb_commands_registered():
 
     for group_name, expected_subs in expected_groups.items():
         group = main.commands[group_name]
-        assert isinstance(group, click.Group)
+        assert isinstance(group, AXGroup)
         assert set(group.commands.keys()) == expected_subs
 
     for top_name in expected_top_commands:

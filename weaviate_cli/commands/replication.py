@@ -12,6 +12,7 @@ from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.cluster_manager import ClusterManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_success,
     get_runtime,
     handle_command_error,
@@ -42,7 +43,7 @@ def _replication_to_dict(op: Any, *, include_history: bool = True) -> dict[str, 
     return data
 
 
-@click.group("replication", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("replication", cls=AXGroup)
 def replication_group() -> None:
     """Manage shard replication operations in Weaviate."""
 

@@ -15,6 +15,7 @@ from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_success,
     get_runtime,
     handle_command_error,
@@ -46,7 +47,7 @@ def _store_user_api_key(ctx: click.Context, user_name: str, api_key: str) -> str
     return str(config_path)
 
 
-@click.group("user", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("user", cls=AXGroup)
 def user_group() -> None:
     """Manage dynamic RBAC users in Weaviate."""
 

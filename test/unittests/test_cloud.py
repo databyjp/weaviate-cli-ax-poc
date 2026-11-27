@@ -555,6 +555,97 @@ def test_write_env_warns_when_unignored_in_git_repo(tmp_path):
     assert res_ok["warnings"] == []
 
 
+@pytest.mark.parametrize("writer", [write_env_credentials, write_config_credentials])
+def test_credential_replacement_is_private_and_preserves_original_on_failure(
+    tmp_path, writer
+):
+    dest = tmp_path / "profile"
+    dest.write_text("{}\n")
+
+    def fail_replace(temporary, target):
+        pending = Path(temporary)
+        assert pending.parent == dest.parent
+        assert stat.S_IMODE(pending.stat().st_mode) == 0o600
+        assert "one-time-key" in pending.read_text()
+        assert target == dest and dest.read_text() == "{}\n"
+        raise OSError("replace failed")
+
+    previous = os.umask(0o022)
+    try:
+        with (
+            patch("os.replace", side_effect=fail_replace),
+            pytest.raises(OSError, match="replace failed"),
+        ):
+            writer(dest, url=None, api_key="one-time-key")
+    finally:
+        os.umask(previous)
+    assert list(tmp_path.iterdir()) == [dest]
+    assert dest.read_text() == "{}\n"
+
+
+@pytest.mark.parametrize(
+    ("fail_env", "fail_config"), [(True, False), (False, True), (True, True)]
+)
+@pytest.mark.parametrize("json_mode", [True, False])
+@pytest.mark.parametrize("command", [["create", "--wait"], ["get", "clu-1"]])
+def test_cloud_save_failure_retains_cluster_result(
+    cli_runner, tmp_path, fail_env, fail_config, json_mode, command
+):
+    blocked = tmp_path / "not-a-directory"
+    blocked.touch()
+    env_file = (blocked if fail_env else tmp_path) / ".env"
+    config_file = (blocked if fail_config else tmp_path) / "config.json"
+    destinations = [(env_file, fail_env), (config_file, fail_config)]
+    fake_bin = tmp_path / "wcloud"
+    fake_bin.touch(mode=0o700)
+
+    def runner(args):
+        if list(args[1:3]) == ["auth", "whoami"]:
+            return CommandResult(0, '{"data":{}}', "")
+        assert list(args[1:3]) == ["cluster", command[0]]
+        return CommandResult(
+            0, '{"data":{"id":"clu-1","api_key":{"value":"one-time-key"}}}', ""
+        )
+
+    manager = CloudManager(
+        env={"WEAVIATE_WCLOUD_PATH": str(fake_bin)},
+        runner=runner,
+        git_ignored_checker=lambda _: True,
+    )
+    with patch("weaviate_cli.commands.cloud._make_manager", return_value=manager):
+        result = cli_runner.invoke(
+            main,
+            [
+                "--json" if json_mode else "--no-json",
+                "cloud",
+                *command,
+                "--write-env",
+                str(env_file),
+                "--write-config",
+                str(config_file),
+            ],
+        )
+    assert result.exit_code == 1
+    assert "do not retry provisioning" in result.stderr
+    assert "one-time-key" not in result.stderr
+    assert "one-time-key" in result.stdout and "clu-1" in result.stdout
+    for path, failed in destinations:
+        if failed:
+            assert str(path) in result.stderr
+        else:
+            assert "one-time-key" in path.read_text() and str(path) in result.stdout
+    if json_mode:
+        payload = json.loads(result.stdout)
+        assert payload["error"]["code"] == "CREDENTIAL_SAVE_FAILED"
+        assert payload["metadata"]["exit_code"] == 1
+        assert payload["data"]["credentials_saved_to"] == [
+            str(p) for p, f in destinations if not f
+        ]
+        assert payload["data"]["credential_save_failures"] == [
+            str(p) for p, f in destinations if f
+        ]
+
+
 def test_write_helpers_standalone(tmp_path):
     env_p = write_env_credentials(
         tmp_path / "new.env", url="https://x.weaviate.cloud", api_key="k"

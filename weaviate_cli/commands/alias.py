@@ -10,6 +10,7 @@ from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.alias_manager import AliasManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     emit_success,
     get_runtime,
@@ -18,7 +19,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("alias", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("alias", cls=AXGroup)
 def alias_group() -> None:
     """Manage collection aliases in Weaviate."""
 

@@ -7,6 +7,7 @@ from typing import Any
 
 import click
 
+from weaviate_cli.errors import CLIError
 from weaviate_cli.managers.cloud_manager import (
     WCLOUD_VERSION,
     CloudManager,
@@ -16,6 +17,7 @@ from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
     AXGroup,
     RuntimeContext,
+    emit_error,
     emit_success,
     emit_warning,
     get_runtime,
@@ -58,6 +60,31 @@ def _render_cluster_text(data: dict[str, Any]) -> None:
         click.echo(f"\nNotice: {data['one_time_api_key_notice']}")
     if data.get("next_step"):
         click.echo(f"Next:   {data['next_step']}")
+
+
+def _emit_cluster_result(
+    runtime: RuntimeContext, result: dict[str, Any], command: str
+) -> None:
+    for warning in result.pop("warnings", ()):
+        emit_warning(runtime, warning)
+    if failed := result.get("credential_save_failures"):
+        message = f"Could not save credentials to: {', '.join(failed)}. The cluster exists; do not retry provisioning."
+        if runtime.json_output:
+            click.echo(message, err=True)
+        else:
+            _render_cluster_text(result)
+        emit_error(
+            runtime,
+            CLIError("CREDENTIAL_SAVE_FAILED", message),
+            command=command,
+            data=result,
+        )
+    emit_success(
+        runtime,
+        result,
+        command=command,
+        text_renderer=lambda: _render_cluster_text(result),
+    )
 
 
 def _render_clusters_text(data: dict[str, Any]) -> None:
@@ -435,14 +462,7 @@ def cloud_create(
             write_config=write_config,
             allow_install=install_wcloud,
         )
-        for warning in result.pop("warnings", ()):
-            emit_warning(runtime, warning)
-        emit_success(
-            runtime,
-            result,
-            command=command,
-            text_renderer=lambda: _render_cluster_text(result),
-        )
+        _emit_cluster_result(runtime, result, command)
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)
 
@@ -547,14 +567,7 @@ def cloud_get(
             write_config=write_config,
             allow_install=install_wcloud,
         )
-        for warning in result.pop("warnings", ()):
-            emit_warning(runtime, warning)
-        emit_success(
-            runtime,
-            result,
-            command=command,
-            text_renderer=lambda: _render_cluster_text(result),
-        )
+        _emit_cluster_result(runtime, result, command)
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)
 

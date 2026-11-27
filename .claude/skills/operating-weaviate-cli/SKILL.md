@@ -138,7 +138,7 @@ weaviate-cli mcp config --client claude-code --check
 weaviate-cli cloud whoami
 
 # Provision a cluster and capture the ONE-TIME admin API key into a durable gitignored file
-weaviate-cli cloud create my-cluster --region eu-central-1 --wait --write-env .env.cloud
+weaviate-cli cloud create --name my-cluster --region eu-central-1 --wait --write-env .env.cloud
 # Ensure .env.cloud is in .gitignore, then verify:
 weaviate-cli --env-file .env.cloud status
 weaviate-cli --env-file .env.cloud mcp config --client claude-code --check
@@ -146,6 +146,7 @@ weaviate-cli --env-file .env.cloud mcp config --client claude-code --check
 
 **Critical Cloud rules:**
 - **One-time admin API key**: Weaviate Cloud returns the cluster admin API key **only once** (on `cloud create --wait` or the first `cloud get <id>` after `READY`). Neither `wcloud` nor `weaviate-cli` stores it automatically. Always pass `--write-env` to a durable gitignored path (`.env` or `.env.<name>` added to `.gitignore`) or `--write-config ~/.config/weaviate/<name>.json` — or immediately prompt the user to save `WEAVIATE_URL` and `WEAVIATE_API_KEY`.
+- **`CREDENTIAL_SAVE_FAILED` (exit 1)**: The cluster exists. Do not retry provisioning. Check `data.credentials_saved_to` for successful writes and `data.credential_save_failures` for failed paths. If no write succeeded, save the one-time key from stdout before discarding it. Treat this output as a secret, not a CI log.
 - **`wcloud` installation**: Resolved `WEAVIATE_WCLOUD_PATH` > `$PATH` > `~/.cache/weaviate-cli/bin/wcloud`. Never silently downloaded in non-TTY; use `weaviate-cli cloud install-wcloud` (SHA-256 verified) or ask the user to install `wcloud`.
 
 ### 3. Collections, Tenants, and Aliases
@@ -157,10 +158,10 @@ weaviate-cli collection update Articles --description "Knowledge base"
 weaviate-cli collection delete Articles
 
 # Tenants require explicit names (states: hot/active, cold/inactive, frozen/offloaded)
-weaviate-cli tenant create --collection Articles --tenants "tenant-a,tenant-b" --state active
+weaviate-cli tenant create tenant-a tenant-b --collection Articles --state active
 weaviate-cli tenant list --collection Articles
-weaviate-cli tenant update --collection Articles --tenants "tenant-b" --state frozen
-weaviate-cli tenant delete --collection Articles --tenants "tenant-b"
+weaviate-cli tenant update tenant-b --collection Articles --state frozen
+weaviate-cli tenant delete tenant-b --collection Articles
 
 # Zero-downtime alias switch
 weaviate-cli alias create Docs Articles_v1
@@ -175,7 +176,7 @@ weaviate-cli alias delete Docs
 # Quote permissions with wildcards so zsh/bash does not glob them
 weaviate-cli role create ArticlesReader -p 'read_collections:Articles' -p 'read_data:Articles'
 weaviate-cli user create app-reader
-weaviate-cli role assign --role-name ArticlesReader --user-name app-reader
+weaviate-cli role assign --role ArticlesReader --user app-reader
 weaviate-cli role get ArticlesReader
 weaviate-cli user get app-reader
 weaviate-cli user update app-reader --rotate-api-key
@@ -215,7 +216,7 @@ weaviate-cli export cancel exp-2026 --backend s3
 |----------|-------------|
 | `WEAVIATE_URL` | Weaviate REST endpoint URL |
 | `WEAVIATE_API_KEY` | Weaviate Bearer API key |
-| `WEAVIATE_GRPC_URL` | Optional explicit Weaviate gRPC endpoint |
+| `WEAVIATE_GRPC_URL` | Optional explicit Weaviate gRPC endpoint. When overriding the REST target, supply the matching gRPC override at the same or higher precedence; otherwise the CLI derives the endpoint from the new target. |
 | `WEAVIATE_WCLOUD_PATH` | Optional explicit path override for the `wcloud` binary |
 | `SLOW_CONNECTION` | Set to `1`/`true` to double Weaviate client timeouts |
 | `HOME` | Base directory for `~/.config/weaviate/config.json` and `~/.cache/weaviate-cli/` |

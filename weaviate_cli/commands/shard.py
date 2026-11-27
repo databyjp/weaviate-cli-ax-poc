@@ -12,6 +12,7 @@ from weaviate_cli.managers.cluster_manager import ClusterManager
 from weaviate_cli.managers.shard_manager import ShardManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     emit_success,
     get_runtime,
@@ -21,7 +22,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("shard", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("shard", cls=AXGroup)
 def shard_group() -> None:
     """Inspect and manage collection shards."""
 

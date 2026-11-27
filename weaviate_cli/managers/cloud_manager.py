@@ -248,11 +248,15 @@ def extract_cluster_credentials(
     return url, grpc_url, api_key
 
 
-def _set_0600_permissions(path: Path) -> None:
+def _write_private_file(dest: Path, content: str) -> None:
+    # mkstemp creates the file privately before any credential bytes are written.
+    fd, temporary = tempfile.mkstemp(dir=dest.parent)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.replace(temporary, dest)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def write_env_credentials(
@@ -306,8 +310,7 @@ def write_env_credentials(
             output_lines.append(f"{key}={value}")
 
     content = "\n".join(output_lines) + "\n"
-    dest.write_text(content, encoding="utf-8")
-    _set_0600_permissions(dest)
+    _write_private_file(dest, content)
     return dest
 
 
@@ -338,8 +341,7 @@ def write_config_credentials(
     if api_key:
         config_data["auth"] = {"type": "api_key", "api_key": api_key}
 
-    dest.write_text(json.dumps(config_data, indent=2) + "\n", encoding="utf-8")
-    _set_0600_permissions(dest)
+    _write_private_file(dest, json.dumps(config_data, indent=2) + "\n")
     return dest
 
 
@@ -734,21 +736,21 @@ class CloudManager:
 
         saved_paths: list[str] = []
         if api_key is not None:
-            written_files: list[Path] = []
-            if write_env:
-                saved = write_env_credentials(
-                    write_env, url=url, api_key=api_key, grpc_url=grpc_url
-                )
-                saved_paths.append(str(saved))
-                written_files.append(saved)
-            if write_config:
-                saved_cfg = write_config_credentials(
-                    write_config, url=url, api_key=api_key, grpc_url=grpc_url
-                )
-                saved_paths.append(str(saved_cfg))
-                written_files.append(saved_cfg)
-
-            for written in written_files:
+            failed_paths: list[str] = []
+            for path, writer in (
+                (write_env, write_env_credentials),
+                (write_config, write_config_credentials),
+            ):
+                if not path:
+                    continue
+                try:
+                    written = writer(path, url=url, api_key=api_key, grpc_url=grpc_url)
+                except (OSError, ValueError):
+                    # The cloud operation already succeeded. Keep its one-time key
+                    # available and still attempt any other requested destination.
+                    failed_paths.append(path)
+                    continue
+                saved_paths.append(str(written))
                 if self._git_ignored_checker(written) is False:
                     warnings.append(
                         f"'{written}' is inside a Git repository and is not ignored by "
@@ -756,6 +758,8 @@ class CloudManager:
                         "key is not exposed."
                     )
 
+            if failed_paths:
+                enriched["credential_save_failures"] = failed_paths
             enriched["credentials_saved_to"] = saved_paths
             if saved_paths:
                 joined = ", ".join(saved_paths)
@@ -764,7 +768,7 @@ class CloudManager:
                     "Weaviate Cloud displays this key only once — keep that file "
                     "secret (gitignored) and back it up if needed."
                 )
-                if write_env:
+                if write_env and str(Path(write_env)) in saved_paths:
                     enriched["next_step"] = (
                         f"weaviate-cli --env-file {write_env} status"
                     )

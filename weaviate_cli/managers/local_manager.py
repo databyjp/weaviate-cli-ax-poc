@@ -835,10 +835,10 @@ class LocalManager:
                 action = "updated"
             else:
                 if requested_mode == "default":
-                    self._check_default_ports_available()
-                    started = self._run_docker(
-                        ["docker", "start", *(c["name"] for c in existing)]
-                    )
+                    # Running siblings may already own the published ports. Docker
+                    # checks for conflicts when binding the stopped services.
+                    stopped = [c["name"] for c in existing if not c["running"]]
+                    started = self._run_docker(["docker", "start", *stopped])
                     if started.returncode != 0:
                         self._raise_compose_or_port_error(started)
                 else:
@@ -997,41 +997,24 @@ class LocalManager:
             "logs": combined,
         }
 
+    def _list_project_resources(self, kind: Literal["network", "volume"]) -> list[str]:
+        label_filter = f"label={COMPOSE_PROJECT_LABEL}={self.project}"
+        result = self._run_docker(
+            ["docker", kind, "ls", "--filter", label_filter, "--format", "{{.Name}}"]
+        )
+        if result.returncode != 0:
+            raise CLIError(
+                "DOCKER_ERROR",
+                f"Failed to list local {kind}s: {(result.stderr or result.stdout).strip()}",
+            )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
     def destroy(self) -> dict[str, Any]:
         """Remove all containers, networks, and volumes owned by `weaviate-cli-local`."""
         self._ensure_docker_ready(require_compose=False)
         containers = self._inspect_project_containers()
-        label_filter = f"label={COMPOSE_PROJECT_LABEL}={self.project}"
-
-        networks_res = self._run_docker(
-            [
-                "docker",
-                "network",
-                "ls",
-                "--filter",
-                label_filter,
-                "--format",
-                "{{.Name}}",
-            ]
-        )
-        networks = [
-            line.strip() for line in networks_res.stdout.splitlines() if line.strip()
-        ]
-
-        volumes_res = self._run_docker(
-            [
-                "docker",
-                "volume",
-                "ls",
-                "--filter",
-                label_filter,
-                "--format",
-                "{{.Name}}",
-            ]
-        )
-        volumes = [
-            line.strip() for line in volumes_res.stdout.splitlines() if line.strip()
-        ]
+        networks = self._list_project_resources("network")
+        volumes = self._list_project_resources("volume")
 
         if not containers and not networks and not volumes:
             warnings: list[str] = []
@@ -1066,8 +1049,12 @@ class LocalManager:
         removed_networks: list[str] = []
         if networks:
             net_res = self._run_docker(["docker", "network", "rm", *networks])
-            if net_res.returncode == 0:
-                removed_networks = networks
+            if net_res.returncode != 0:
+                raise CLIError(
+                    "DOCKER_ERROR",
+                    f"Failed to remove local networks: {(net_res.stderr or net_res.stdout).strip()}",
+                )
+            removed_networks = networks
 
         removed_volumes: list[str] = []
         if volumes:
