@@ -151,10 +151,20 @@ def render_guide_markdown(
     """Render a compact Markdown reference dynamically from the live Click command tree."""
     if topic is not None:
         target_cmd = root.commands[topic]
+        extra_notes: list[str] = []
+        if topic == "cloud":
+            extra_notes = [
+                "## Important notes for Weaviate Cloud",
+                "- **One-time admin API key:** Weaviate Cloud displays the cluster admin API key **once** (on `cloud create --wait` or the first `cloud get <id>` after `READY`) and neither `wcloud` nor `weaviate-cli` stores it automatically. Always pass `--write-env` to a durable, gitignored path such as `.env` (or `.env.<name>` added to `.gitignore` if `.env` already exists) or `~/.config/weaviate/<name>.json` — avoid disposable directories like `.venv/` — or explicitly prompt the user to save `WEAVIATE_URL` and `WEAVIATE_API_KEY` immediately.",
+                "- **Browser OAuth login:** `cloud login` requires an interactive terminal with a local browser (`127.0.0.1` loopback). Run `cloud whoami` first; in non-TTY shells, fail fast and ask the user to run `weaviate-cli cloud login`.",
+                "- **`wcloud` binary resolution:** `WEAVIATE_WCLOUD_PATH` > `$PATH` > `~/.cache/weaviate-cli/bin/wcloud`. No silent auto-downloads in non-TTY mode; pass `--install-wcloud` or run `weaviate-cli cloud install-wcloud` for SHA-256 verified install.",
+                "",
+            ]
         lines = [
             f"# weaviate-cli guide: {topic}",
             "",
             *_render_command_detail_markdown(target_cmd, f"weaviate-cli {topic}"),
+            *extra_notes,
             "Run `weaviate-cli guide` for the full overview, or `weaviate-cli guide --schema "
             f"{topic}` for machine-readable JSON.",
         ]
@@ -166,7 +176,7 @@ def render_guide_markdown(
         "Agent-first CLI for Weaviate cluster DDL and operational administration.",
         "",
         "## Scope & surface boundaries",
-        "- **CLI (`weaviate-cli`)**: Local Docker cluster lifecycle (`local`), cluster status, collections, tenants, aliases, nodes, shards, replication, backups, exports, roles, and users.",
+        "- **CLI (`weaviate-cli`)**: Local Docker (`local`) and Weaviate Cloud (`cloud`, via `wcloud`) lifecycle, cluster status, collections, tenants, aliases, nodes, shards, replication, backups, exports, roles, and users.",
         "- **Native MCP (`/v1/mcp`) or SDKs**: Querying, searching, or upserting object data.",
         "",
         "## Connection precedence (highest to lowest)",
@@ -204,6 +214,11 @@ def render_guide_markdown(
             "weaviate-cli local start",
             "weaviate-cli local template > docker-compose.yml",
             "weaviate-cli local start --compose-file docker-compose.yml",
+            "",
+            "# Provision a Weaviate Cloud cluster (one-time admin API key: always save via --write-env or prompt user!)",
+            "weaviate-cli cloud whoami                     # pre-check auth (interactive 'cloud login' requires a browser)",
+            "weaviate-cli cloud create --wait --write-env .env",
+            "weaviate-cli --env-file .env status",
             "",
             "# Inspect target, readiness, version, identity, enabled vectorizers, and /v1/mcp",
             "weaviate-cli --env-file .env status",

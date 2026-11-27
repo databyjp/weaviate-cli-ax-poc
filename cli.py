@@ -27,6 +27,7 @@ import click
 from weaviate_cli import __version__
 from weaviate_cli.commands.alias import alias_group
 from weaviate_cli.commands.backup import backup_group
+from weaviate_cli.commands.cloud import cloud_group
 from weaviate_cli.commands.collection import collection_group
 from weaviate_cli.commands.export import export_group
 from weaviate_cli.commands.guide import guide_command
@@ -47,11 +48,12 @@ from weaviate_cli.runtime import (
     resolve_json_output,
 )
 
-ROOT_HELP = """Weaviate CLI for local cluster lifecycle, DDL, and operational administration.
+ROOT_HELP = """Weaviate CLI for cluster lifecycle (local Docker & Weaviate Cloud), DDL, and admin.
 
-Scope: manages local Docker clusters, collections, tenants, aliases, nodes,
-shards, replication, backups, exports, roles, and users. For querying or
-upserting object data, use Weaviate's native MCP endpoint (/v1/mcp) or an SDK.
+Scope: manages local Docker clusters, Weaviate Cloud provisioning (via wcloud),
+collections, tenants, aliases, nodes, shards, replication, backups, exports,
+roles, and users. For querying or upserting object data, use Weaviate's native
+MCP endpoint (/v1/mcp) or an SDK.
 
 \b
 Connection precedence (highest to lowest):
@@ -163,6 +165,7 @@ def main(
 main.add_command(status_command)
 main.add_command(guide_command)
 main.add_command(local_group)
+main.add_command(cloud_group)
 main.add_command(collection_group)
 main.add_command(tenant_group)
 main.add_command(alias_group)
