@@ -117,6 +117,7 @@ def test_main_noun_verb_commands_registered():
             "revoke-permission",
         },
         "user": {"create", "list", "get", "update", "delete"},
+        "group": {"list", "get", "assign-role", "revoke-role"},
     }
     expected_top_commands = {"status", "guide"}
     assert (

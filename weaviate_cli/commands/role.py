@@ -9,6 +9,7 @@ from weaviate.rbac.models import Role
 from weaviate_cli.completion.complete import role_name_complete
 from weaviate_cli.defaults import PERMISSION_HELP_STRING
 from weaviate_cli.errors import CLIError, ExitCode
+from weaviate_cli.managers.group_manager import GroupManager
 from weaviate_cli.managers.role_manager import RoleManager
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.runtime import (
@@ -261,14 +262,20 @@ def delete_role_cli(
 @click.option(
     "--user",
     "user_name",
-    required=True,
-    help="User to assign the role(s) to.",
+    default=None,
+    help="User to assign the role(s) to (mutually exclusive with --group).",
+)
+@click.option(
+    "--group",
+    "group_id",
+    default=None,
+    help="OIDC group to assign the role(s) to (mutually exclusive with --user).",
 )
 @click.option(
     "--user-type",
     type=click.Choice(["db", "oidc"]),
     default="db",
-    help="Type of user (default: 'db').",
+    help="Type of user when --user is specified (default: 'db').",
 )
 @click.option(
     "--json/--no-json",
@@ -280,27 +287,44 @@ def delete_role_cli(
 def assign_role_cli(
     ctx: click.Context,
     role_names: tuple[str, ...],
-    user_name: str,
+    user_name: str | None,
+    group_id: str | None,
     user_type: str,
     json_output: bool | None,
 ) -> None:
-    """Assign one or more roles to a user."""
+    """Assign one or more roles to a user or OIDC group."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "role assign"
     client: WeaviateClient | None = None
     try:
+        if bool(user_name) == bool(group_id):
+            raise CLIError(
+                code="INVALID_OPTIONS",
+                message="Specify exactly one of --user or --group.",
+                exit_code=ExitCode.USAGE,
+            )
         client = get_client_from_context(ctx)
-        user_manager = UserManager(client)
-        emit_captured_json_or_text(
-            runtime,
-            command=command,
-            invoke=lambda as_json: user_manager.add_role(
-                role_name=role_names,
-                user_name=user_name,
-                user_type=user_type,
-                json_output=as_json,
-            ),
-        )
+        if group_id:
+            result = GroupManager(client).assign_roles(group_id, role_names)
+            emit_success(
+                runtime,
+                result,
+                command=command,
+                text_renderer=lambda: click.echo(result["message"]),
+            )
+        else:
+            assert user_name is not None
+            user_manager = UserManager(client)
+            emit_captured_json_or_text(
+                runtime,
+                command=command,
+                invoke=lambda as_json: user_manager.add_role(
+                    role_name=role_names,
+                    user_name=user_name,
+                    user_type=user_type,
+                    json_output=as_json,
+                ),
+            )
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)
     finally:
@@ -320,14 +344,20 @@ def assign_role_cli(
 @click.option(
     "--user",
     "user_name",
-    required=True,
-    help="User to revoke the role(s) from.",
+    default=None,
+    help="User to revoke the role(s) from (mutually exclusive with --group).",
+)
+@click.option(
+    "--group",
+    "group_id",
+    default=None,
+    help="OIDC group to revoke the role(s) from (mutually exclusive with --user).",
 )
 @click.option(
     "--user-type",
     type=click.Choice(["db", "oidc"]),
     default="db",
-    help="Type of user (default: 'db').",
+    help="Type of user when --user is specified (default: 'db').",
 )
 @click.option(
     "--json/--no-json",
@@ -339,27 +369,44 @@ def assign_role_cli(
 def revoke_role_cli(
     ctx: click.Context,
     role_names: tuple[str, ...],
-    user_name: str,
+    user_name: str | None,
+    group_id: str | None,
     user_type: str,
     json_output: bool | None,
 ) -> None:
-    """Revoke one or more roles from a user."""
+    """Revoke one or more roles from a user or OIDC group."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "role revoke"
     client: WeaviateClient | None = None
     try:
+        if bool(user_name) == bool(group_id):
+            raise CLIError(
+                code="INVALID_OPTIONS",
+                message="Specify exactly one of --user or --group.",
+                exit_code=ExitCode.USAGE,
+            )
         client = get_client_from_context(ctx)
-        user_manager = UserManager(client)
-        emit_captured_json_or_text(
-            runtime,
-            command=command,
-            invoke=lambda as_json: user_manager.revoke_role(
-                role_name=role_names,
-                user_name=user_name,
-                user_type=user_type,
-                json_output=as_json,
-            ),
-        )
+        if group_id:
+            result = GroupManager(client).revoke_roles(group_id, role_names)
+            emit_success(
+                runtime,
+                result,
+                command=command,
+                text_renderer=lambda: click.echo(result["message"]),
+            )
+        else:
+            assert user_name is not None
+            user_manager = UserManager(client)
+            emit_captured_json_or_text(
+                runtime,
+                command=command,
+                invoke=lambda as_json: user_manager.revoke_role(
+                    role_name=role_names,
+                    user_name=user_name,
+                    user_type=user_type,
+                    json_output=as_json,
+                ),
+            )
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)
     finally:

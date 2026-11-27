@@ -104,7 +104,11 @@ def test_user_get_and_role_get_contracts(cli_runner: CliRunner):
 
     assert res_user.exit_code == 0
     user_payload = json.loads(res_user.stdout)
-    assert user_payload["data"] == {"user_id": "agent1", "roles": ["admin"]}
+    assert user_payload["data"] == {
+        "user_id": "agent1",
+        "roles": ["admin"],
+        "groups": [],
+    }
     assert user_payload["metadata"]["command"] == "user get"
 
     assert res_role.exit_code == 4

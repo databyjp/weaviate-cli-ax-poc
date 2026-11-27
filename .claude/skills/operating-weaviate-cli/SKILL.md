@@ -101,8 +101,9 @@ weaviate-cli [--env-file .env] status
 | `replication` | `create`, `list`, `get`, `cancel`, `delete` | Cross-node shard `COPY`/`MOVE` replication operations |
 | `backup` | `list`, `create`, `get`, `restore`, `cancel` | Cluster/collection/RBAC backup and restore (`s3`, `gcs`, `azure`, `filesystem`) |
 | `export` | `create`, `get`, `cancel` | Collection Parquet export (`filesystem`, `s3`, `gcs`, `azure`) |
-| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission` | RBAC role and permission administration |
-| `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management and API key rotation |
+| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission` | RBAC role and permission administration (users & OIDC groups) |
+| `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management, API key rotation/revocation, and audit metadata |
+| `group` | `list`, `get`, `assign-role`, `revoke-role` | OIDC group RBAC role assignments |
 
 ## Core Workflows
 

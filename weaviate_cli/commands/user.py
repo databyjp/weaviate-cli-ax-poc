@@ -16,7 +16,7 @@ from weaviate_cli.credentials import (
 )
 from weaviate_cli.defaults import UpdateUserDefaults
 from weaviate_cli.errors import CLIError, ExitCode
-from weaviate_cli.managers.user_manager import UserManager
+from weaviate_cli.managers.user_manager import UserManager, db_user_to_dict
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
     AXGroup,
@@ -150,8 +150,13 @@ def create_user_cli(
     "--role",
     "role_name",
     default=None,
-    help="Filter users assigned to a specific role.",
+    help="Filter users assigned to a specific role (shows user type via get_user_assignments).",
     shell_complete=role_name_complete,
+)
+@click.option(
+    "--include-last-used/--no-include-last-used",
+    default=True,
+    help="Include last_used_time audit timestamps for DB users (default: enabled).",
 )
 @click.option(
     "--json/--no-json",
@@ -161,7 +166,10 @@ def create_user_cli(
 )
 @click.pass_context
 def list_users_cli(
-    ctx: click.Context, role_name: str | None, json_output: bool | None
+    ctx: click.Context,
+    role_name: str | None,
+    include_last_used: bool,
+    json_output: bool | None,
 ) -> None:
     """List all users, or users assigned to a specific role."""
     runtime = get_runtime(ctx, json_override=json_output)
@@ -171,33 +179,29 @@ def list_users_cli(
         client = get_client_from_context(ctx)
         user_man = UserManager(client)
         if role_name:
-            users = user_man.get_user_from_role(role_name=role_name)
-            payload: dict[str, Any] = {"role": role_name, "users": list(users)}
+            assignments = user_man.get_user_assignments_from_role(role_name=role_name)
+            payload: dict[str, Any] = {
+                "role": role_name,
+                "users": [a["user_id"] for a in assignments],
+                "user_assignments": assignments,
+            }
 
             def _render_role_users() -> None:
                 click.echo(f"Users of role '{role_name}':")
                 separator = "-" * 50
                 click.echo(f"\n{separator}")
-                if not users:
+                if not assignments:
                     click.echo(f"No users found for role '{role_name}'.")
                 else:
-                    for user in users:
-                        user_man.print_user(user)
+                    for item in assignments:
+                        click.echo(f"User: {item['user_id']} ({item['user_type']})")
 
             emit_success(
                 runtime, payload, command=command, text_renderer=_render_role_users
             )
         else:
-            db_users = user_man.get_all_users()
-            users_data = [
-                {
-                    "user_id": u.user_id,
-                    "active": u.active,
-                    "user_type": u.user_type.name,
-                    "roles": list(u.role_names),
-                }
-                for u in db_users
-            ]
+            db_users = user_man.get_all_users(include_last_used_time=include_last_used)
+            users_data = [db_user_to_dict(u) for u in db_users]
 
             def _render_all_users() -> None:
                 click.echo("Users:")
@@ -221,6 +225,11 @@ def list_users_cli(
 @user_group.command("get", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("user_name", required=False, default=None)
 @click.option(
+    "--include-last-used/--no-include-last-used",
+    default=True,
+    help="Include last_used_time audit timestamp for DB users (default: enabled).",
+)
+@click.option(
     "--json/--no-json",
     "json_output",
     default=None,
@@ -228,7 +237,10 @@ def list_users_cli(
 )
 @click.pass_context
 def get_user_cli(
-    ctx: click.Context, user_name: str | None, json_output: bool | None
+    ctx: click.Context,
+    user_name: str | None,
+    include_last_used: bool,
+    json_output: bool | None,
 ) -> None:
     """Get details for a specific user, or the current user if USER_NAME is omitted."""
     runtime = get_runtime(ctx, json_override=json_output)
@@ -238,7 +250,9 @@ def get_user_cli(
         client = get_client_from_context(ctx)
         user_man = UserManager(client)
         if user_name:
-            user = user_man.get_user(user_name=user_name)
+            user = user_man.get_user(
+                user_name=user_name, include_last_used_time=include_last_used
+            )
             if user is None:
                 raise CLIError(
                     code="USER_NOT_FOUND",
@@ -247,12 +261,7 @@ def get_user_cli(
                     hint="Run 'weaviate-cli user list' to see existing users.",
                 )
             assert isinstance(user, UserDB)
-            data = {
-                "user_id": user.user_id,
-                "active": user.active,
-                "user_type": user.user_type.name,
-                "roles": list(user.role_names),
-            }
+            data = db_user_to_dict(user)
             emit_success(
                 runtime,
                 data,
@@ -265,6 +274,7 @@ def get_user_cli(
             data = {
                 "user_id": own_user.user_id,
                 "roles": list(own_user.roles.keys()),
+                "groups": list(getattr(own_user, "groups", None) or []),
             }
             emit_success(
                 runtime,
@@ -302,6 +312,12 @@ def get_user_cli(
     help="Deactivate the user.",
 )
 @click.option(
+    "--revoke-key",
+    is_flag=True,
+    default=False,
+    help="Also revoke the user's API key when used with --deactivate.",
+)
+@click.option(
     "--store",
     is_flag=True,
     help="Store the rotated key in an unused user slot in the config file.",
@@ -324,6 +340,7 @@ def update_user_cli(
     rotate_api_key: bool,
     activate: bool,
     deactivate: bool,
+    revoke_key: bool,
     store: bool,
     include_key: bool,
     json_output: bool | None,
@@ -341,6 +358,13 @@ def update_user_cli(
             raise CLIError(
                 code="MISSING_ACTION",
                 message="Specify one of --rotate-api-key, --activate, or --deactivate.",
+                exit_code=ExitCode.USAGE,
+            )
+
+        if revoke_key and not deactivate:
+            raise CLIError(
+                code="INVALID_OPTIONS",
+                message="--revoke-key can only be used together with --deactivate.",
                 exit_code=ExitCode.USAGE,
             )
 
@@ -362,6 +386,7 @@ def update_user_cli(
             rotate_api_key=rotate_api_key,
             activate=activate,
             deactivate=deactivate,
+            revoke_key=revoke_key,
         )
 
         if rotate_api_key and isinstance(result, str):
@@ -382,13 +407,18 @@ def update_user_cli(
                 text_renderer=lambda: click.echo(msg),
             )
         elif deactivate:
-            msg = f"User '{user_name}' deactivated successfully."
+            msg = (
+                f"User '{user_name}' deactivated and API key revoked successfully."
+                if revoke_key
+                else f"User '{user_name}' deactivated successfully."
+            )
             emit_success(
                 runtime,
                 {
                     "status": "success",
                     "user_name": user_name,
                     "active": False,
+                    "key_revoked": revoke_key,
                     "message": msg,
                 },
                 command=command,

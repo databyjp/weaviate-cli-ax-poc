@@ -389,3 +389,64 @@ def test_revoke_role_text_output(user_manager, capsys):
     assert "admin" in out
     assert user_name in out
     assert "revoked" in out
+
+
+def test_update_user_deactivate_with_revoke_key(user_manager):
+    user_manager.update_user(user_name="alice", deactivate=True, revoke_key=True)
+    user_manager.client.users.db.deactivate.assert_called_once_with(
+        user_id="alice", revoke_key=True
+    )
+
+    with pytest.raises(ValueError, match="--revoke-key"):
+        user_manager.update_user(user_name="alice", activate=True, revoke_key=True)
+
+
+def test_db_user_audit_metadata_and_own_user_groups(user_manager, capsys):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from weaviate.rbac.models import UserTypes
+    from weaviate.users.users import OwnUser
+
+    from weaviate_cli.managers.user_manager import db_user_to_dict
+
+    db_user = SimpleNamespace(
+        user_id="svc-bot",
+        active=True,
+        user_type=UserTypes.DB_DYNAMIC,
+        role_names=["reader"],
+        created_at=datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc),
+        last_used_time=datetime(2026, 11, 27, 8, 30, tzinfo=timezone.utc),
+        api_key_first_letters="wv_abc",
+    )
+    serialized = db_user_to_dict(db_user)  # type: ignore[arg-type]
+    assert serialized["created_at"] == "2026-11-01T12:00:00+00:00"
+    assert serialized["last_used_time"] == "2026-11-27T08:30:00+00:00"
+    assert serialized["api_key_first_letters"] == "wv_abc"
+
+    user_manager.print_db_user(db_user)  # type: ignore[arg-type]
+    db_out = capsys.readouterr().out
+    assert "API Key Prefix: wv_abc" in db_out
+    assert "Created At: 2026-11-01T12:00:00+00:00" in db_out
+    assert "Last Used: 2026-11-27T08:30:00+00:00" in db_out
+
+    own = OwnUser(user_id="oidc-alice", roles={"viewer": Mock()}, groups=["eng", "ml"])
+    user_manager.print_own_user(own)
+    own_out = capsys.readouterr().out
+    assert "Groups:" in own_out
+    assert " - Group: eng" in own_out
+    assert " - Group: ml" in own_out
+
+
+def test_get_user_assignments_from_role(user_manager):
+    from types import SimpleNamespace
+
+    user_manager.client.roles.get_user_assignments.return_value = [
+        SimpleNamespace(user_id="alice", user_type=SimpleNamespace(value="db_user")),
+        SimpleNamespace(user_id="bob", user_type=SimpleNamespace(value="oidc")),
+    ]
+    res = user_manager.get_user_assignments_from_role("viewer")
+    assert res == [
+        {"user_id": "alice", "user_type": "db_user"},
+        {"user_id": "bob", "user_type": "oidc"},
+    ]

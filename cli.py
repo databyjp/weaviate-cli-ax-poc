@@ -42,6 +42,7 @@ from weaviate_cli.commands.cloud import cloud_group
 from weaviate_cli.commands.collection import collection_group
 from weaviate_cli.commands.config import config_group
 from weaviate_cli.commands.export import export_group
+from weaviate_cli.commands.group import group_group
 from weaviate_cli.commands.guide import guide_command
 from weaviate_cli.commands.local import local_group
 from weaviate_cli.commands.mcp import mcp_group
@@ -191,6 +192,7 @@ main.add_command(backup_group)
 main.add_command(export_group)
 main.add_command(role_group)
 main.add_command(user_group)
+main.add_command(group_group)
 
 if __name__ == "__main__":
     main()
