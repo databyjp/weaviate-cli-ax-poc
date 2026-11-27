@@ -40,7 +40,7 @@ make test           # Run unit tests
 - **JSON envelope**: Every leaf command supports `--json/--no-json` (parameter `json_output: bool | None = None`, auto-enabled when `!isatty()`, enforced by `test_ax_rollout.py`) and emits a `data`/`error`/`metadata` envelope via `emit_success()` / `handle_command_error()`.
 - **Stream hygiene**: Keep `stdout` strictly for command output; route all warnings, progress notices, and text-mode errors to `stderr` (`emit_warning()` / `click.echo(..., err=True)`).
 - **Exit codes**: Classify all errors through `handle_command_error(ctx, runtime, exc, command=...)` / `CLIError` so semantic exit codes (`0`..`5`) apply consistently.
-- **Safety**: Guard destructive or bulk mutations with `--yes` via `require_confirmation()`. Never print plaintext secrets unless explicitly opted into (e.g., `mcp config --include-key`, or one-time WCD key display on `cloud create --wait`).
+- **Safety**: Guard destructive or bulk mutations with `--yes` via `require_confirmation()`. Preflight key destinations before issuing, retrieving, or rotating a key. Do not overwrite credentials. Only `--include-key` opts into plaintext stdout on success. If every requested save fails after issuance, exit nonzero and return the key on stdout for recovery, never on stderr.
 - **Client lifecycle**: Open in `try`, close in `finally`, and handle exceptions via `handle_command_error(...)`.
 - **Formatting & typing**: Ruff formatting (88-char line length), `make lint`, and `make typecheck` (0 errors).
 

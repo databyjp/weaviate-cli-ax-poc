@@ -63,19 +63,33 @@ def _render_cluster_text(data: dict[str, Any]) -> None:
 
 
 def _emit_cluster_result(
-    runtime: RuntimeContext, result: dict[str, Any], command: str
+    runtime: RuntimeContext,
+    result: dict[str, Any],
+    command: str,
+    *,
+    key_expected: bool = True,
 ) -> None:
     for warning in result.pop("warnings", ()):
         emit_warning(runtime, warning)
+    error = None
     if failed := result.get("credential_save_failures"):
-        message = f"Could not save credentials to: {', '.join(failed)}. The cluster exists; do not retry provisioning."
+        error = CLIError(
+            "CREDENTIAL_SAVE_FAILED",
+            f"Could not save credentials to: {', '.join(failed)}. The cluster exists; do not retry provisioning.",
+        )
+    elif not key_expected and extract_cluster_credentials(result)[2]:
+        error = CLIError(
+            "UNEXPECTED_ONE_TIME_KEY",
+            "Cloud returned a one-time key without --wait. Save it from stdout; do not retry provisioning.",
+        )
+    if error is not None:
         if runtime.json_output:
-            click.echo(message, err=True)
+            click.echo(error.message, err=True)
         else:
             _render_cluster_text(result)
         emit_error(
             runtime,
-            CLIError("CREDENTIAL_SAVE_FAILED", message),
+            error,
             command=command,
             data=result,
         )
@@ -375,10 +389,10 @@ def cloud_regions(
         "IMPORTANT — One-time admin API key:\n"
         "  Weaviate Cloud returns the cluster's admin API key ONCE when the cluster\n"
         "  reaches READY (via --wait, or on the first 'cloud get <id>'). Neither\n"
-        "  wcloud nor weaviate-cli stores it automatically. Pass --write-env to a\n"
-        "  durable, gitignored path such as '.env' (or '.env.<name>' + .gitignore\n"
-        "  if '.env' already exists) or ~/.config/weaviate/<name>.json — avoid\n"
-        "  disposable directories like '.venv/'.\n"
+        "  wcloud nor weaviate-cli stores it automatically. With --wait, choose\n"
+        "  --write-env, --write-config, or --include-key. Use a durable, gitignored\n"
+        "  destination. If all saves fail after issuance, recover the key from\n"
+        "  stdout on exit 1; do not retry provisioning.\n"
         "\b\n"
         "Examples:\n"
         "  weaviate-cli cloud create --name demo --region eu-central-1 --wait --write-env .env\n"
@@ -397,10 +411,15 @@ def cloud_regions(
 )
 @click.option("--tier", type=str, default=None, help="Cluster tier (default: free).")
 @click.option(
+    "--include-key",
+    is_flag=True,
+    help="Include the plaintext one-time key in stdout (requires --wait).",
+)
+@click.option(
     "--wait",
     is_flag=True,
     default=False,
-    help="Block until the cluster is READY and return its endpoint and one-time admin API key.",
+    help="Wait for READY; requires --write-env, --write-config, or --include-key.",
 )
 @click.option(
     "--timeout",
@@ -442,6 +461,7 @@ def cloud_create(
     tier: str | None,
     wait: bool,
     timeout: str | None,
+    include_key: bool,
     write_env: str | None,
     write_config: str | None,
     install_wcloud: bool,
@@ -458,11 +478,12 @@ def cloud_create(
             tier=tier,
             wait=wait,
             timeout=timeout,
+            include_key=include_key,
             write_env=write_env,
             write_config=write_config,
             allow_install=install_wcloud,
         )
-        _emit_cluster_result(runtime, result, command)
+        _emit_cluster_result(runtime, result, command, key_expected=wait)
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)
 
@@ -511,16 +532,21 @@ def cloud_list(
         "\b\n"
         "IMPORTANT — One-time admin API key:\n"
         "  When a cluster was created without --wait, the first 'cloud get <id>'\n"
-        "  after READY returns the one-time admin API key. Pass --write-env to a\n"
-        "  durable, gitignored path such as '.env' (or '.env.<name>' + .gitignore)\n"
-        "  — avoid disposable directories like '.venv/'.\n"
+        "  after READY can return the one-time admin API key. Choose --write-env,\n"
+        "  --write-config, or --include-key before fetching. If all saves fail,\n"
+        "  recover the key from stdout on exit 1.\n"
         "\b\n"
         "Examples:\n"
-        "  weaviate-cli cloud get <cluster-id>\n"
+        "  weaviate-cli cloud status <cluster-id>   # poll without consuming a key\n"
         "  weaviate-cli cloud get <cluster-id> --write-env .env"
     ),
 )
 @click.argument("cluster_id")
+@click.option(
+    "--include-key",
+    is_flag=True,
+    help="Include the plaintext one-time key in stdout, if returned.",
+)
 @click.option(
     "--write-env",
     "write_env",
@@ -551,6 +577,7 @@ def cloud_list(
 def cloud_get(
     ctx: click.Context,
     cluster_id: str,
+    include_key: bool,
     write_env: str | None,
     write_config: str | None,
     install_wcloud: bool,
@@ -563,6 +590,7 @@ def cloud_get(
         manager = _make_manager(runtime)
         result = manager.get_cluster(
             cluster_id,
+            include_key=include_key,
             write_env=write_env,
             write_config=write_config,
             allow_install=install_wcloud,

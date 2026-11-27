@@ -17,6 +17,7 @@ import pytest
 from click.testing import CliRunner
 
 from cli import main
+from weaviate_cli.credentials import reserve_key_file
 from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.cloud_manager import (
     WCLOUD_ASSETS,
@@ -24,8 +25,6 @@ from weaviate_cli.managers.cloud_manager import (
     CloudManager,
     CommandResult,
     extract_cluster_credentials,
-    write_config_credentials,
-    write_env_credentials,
 )
 
 
@@ -317,7 +316,7 @@ def test_create_cluster_wait_nudges_save_and_writes_env_and_config(tmp_path):
     )
 
     # Without --write-env: returns key AND emits SAVE_ONE_TIME_API_KEY nudge + warning
-    unsaved = manager.create_cluster(name="demo-cluster", wait=True)
+    unsaved = manager.create_cluster(name="demo-cluster", wait=True, include_key=True)
     assert unsaved["url"] == "https://demo-123.c0.eu-central-1.gcp.weaviate.cloud"
     assert unsaved["api_key"]["value"] == "wcd-one-time-secret"
     assert unsaved["action_required"] == "SAVE_ONE_TIME_API_KEY"
@@ -337,6 +336,7 @@ def test_create_cluster_wait_nudges_save_and_writes_env_and_config(tmp_path):
         write_env=str(env_file),
         write_config=str(cfg_file),
     )
+    assert "api_key" not in saved
     assert "action_required" not in saved
     assert saved["warnings"] == []
     assert str(env_file) in saved["credentials_saved_to"]
@@ -427,7 +427,7 @@ def test_wcloud_error_exit_code_mapping_and_details(tmp_path):
         is_interactive=False,
     )
     with pytest.raises(CLIError) as exc:
-        manager.get_cluster("bad")
+        manager.get_cluster("bad", include_key=True)
     assert exc.value.code == "WCLOUD_CLUSTER_NOT_FOUND"
     assert exc.value.exit_code == ExitCode.NOT_FOUND
     assert exc.value.details == {"cluster_id": "bad"}
@@ -485,7 +485,9 @@ def test_cloud_cli_commands_and_guide_cloud(cli_runner: CliRunner, tmp_path):
         assert res_regions.exit_code == 0
         assert "eu-central-1 (default)" in res_regions.stdout
 
-        res_create = cli_runner.invoke(main, ["cloud", "create", "--wait"])
+        res_create = cli_runner.invoke(
+            main, ["cloud", "create", "--wait", "--include-key"]
+        )
         assert res_create.exit_code == 0
         payload = json.loads(res_create.stdout)
         assert payload["data"]["action_required"] == "SAVE_ONE_TIME_API_KEY"
@@ -508,6 +510,22 @@ def test_cloud_cli_commands_and_guide_cloud(cli_runner: CliRunner, tmp_path):
     assert ".gitignore" in res_guide.stdout
     assert ".venv/" in res_guide.stdout
     assert "weaviate-cli cloud create" in res_guide.stdout
+
+
+def test_async_create_recovers_unexpected_key_instead_of_reporting_success(cli_runner):
+    manager = MagicMock()
+    manager.create_cluster.return_value = {
+        "id": "cluster-id",
+        "api_key": "unexpected-key",
+    }
+    with patch("weaviate_cli.commands.cloud._make_manager", return_value=manager):
+        result = cli_runner.invoke(main, ["cloud", "create"])
+    payload = json.loads(result.stdout)
+    assert (
+        result.exit_code == 1 and payload["error"]["code"] == "UNEXPECTED_ONE_TIME_KEY"
+    )
+    assert payload["data"]["api_key"] == "unexpected-key"
+    assert "do not retry" in result.stderr and "unexpected-key" not in result.stderr
 
 
 def test_write_env_warns_when_unignored_in_git_repo(tmp_path):
@@ -550,37 +568,39 @@ def test_write_env_warns_when_unignored_in_git_repo(tmp_path):
         git_ignored_checker=lambda _: True,
     )
     res_ok = mgr_ignored.create_cluster(
-        wait=True, write_env=str(tmp_path / ".env.cloud")
+        wait=True, write_env=str(tmp_path / ".env.ignored")
     )
     assert res_ok["warnings"] == []
 
 
-@pytest.mark.parametrize("writer", [write_env_credentials, write_config_credentials])
-def test_credential_replacement_is_private_and_preserves_original_on_failure(
-    tmp_path, writer
+@pytest.mark.parametrize("kind", ["config", "env"])
+def test_credential_publication_is_private_and_preserves_original_on_failure(
+    tmp_path, kind
 ):
     dest = tmp_path / "profile"
-    dest.write_text("{}\n")
+    original = "{}\n" if kind == "config" else "# existing\n"
+    dest.write_text(original)
+    link = os.link
 
-    def fail_replace(temporary, target):
-        pending = Path(temporary)
-        assert pending.parent == dest.parent
-        assert stat.S_IMODE(pending.stat().st_mode) == 0o600
-        assert "one-time-key" in pending.read_text()
-        assert target == dest and dest.read_text() == "{}\n"
-        raise OSError("replace failed")
+    def fail_publish(source, target, **kwargs):
+        if Path(source).name == "pending":
+            assert stat.S_IMODE(source.stat().st_mode) == 0o600
+            assert "one-time-key" in source.read_text()
+            raise OSError("publish failed")
+        return link(source, target, **kwargs)
 
     previous = os.umask(0o022)
     try:
         with (
-            patch("os.replace", side_effect=fail_replace),
-            pytest.raises(OSError, match="replace failed"),
+            reserve_key_file(dest, kind) as destination,
+            patch("os.link", side_effect=fail_publish),
+            pytest.raises(OSError, match="publish failed"),
         ):
-            writer(dest, url=None, api_key="one-time-key")
+            destination.save("one-time-key")
     finally:
         os.umask(previous)
     assert list(tmp_path.iterdir()) == [dest]
-    assert dest.read_text() == "{}\n"
+    assert dest.read_text() == original
 
 
 @pytest.mark.parametrize(
@@ -591,10 +611,8 @@ def test_credential_replacement_is_private_and_preserves_original_on_failure(
 def test_cloud_save_failure_retains_cluster_result(
     cli_runner, tmp_path, fail_env, fail_config, json_mode, command
 ):
-    blocked = tmp_path / "not-a-directory"
-    blocked.touch()
-    env_file = (blocked if fail_env else tmp_path) / ".env"
-    config_file = (blocked if fail_config else tmp_path) / "config.json"
+    env_file = tmp_path / ".env"
+    config_file = tmp_path / "config.json"
     destinations = [(env_file, fail_env), (config_file, fail_config)]
     fake_bin = tmp_path / "wcloud"
     fake_bin.touch(mode=0o700)
@@ -603,6 +621,9 @@ def test_cloud_save_failure_retains_cluster_result(
         if list(args[1:3]) == ["auth", "whoami"]:
             return CommandResult(0, '{"data":{}}', "")
         assert list(args[1:3]) == ["cluster", command[0]]
+        for path, race in destinations:
+            if race:
+                path.write_text("intervening-key")
         return CommandResult(
             0, '{"data":{"id":"clu-1","api_key":{"value":"one-time-key"}}}', ""
         )
@@ -628,9 +649,11 @@ def test_cloud_save_failure_retains_cluster_result(
     assert result.exit_code == 1
     assert "do not retry provisioning" in result.stderr
     assert "one-time-key" not in result.stderr
-    assert "one-time-key" in result.stdout and "clu-1" in result.stdout
+    assert ("one-time-key" in result.stdout) == (fail_env and fail_config)
+    assert "clu-1" in result.stdout
     for path, failed in destinations:
         if failed:
+            assert path.read_text() == "intervening-key"
             assert str(path) in result.stderr
         else:
             assert "one-time-key" in path.read_text() and str(path) in result.stdout
@@ -646,15 +669,32 @@ def test_cloud_save_failure_retains_cluster_result(
         ]
 
 
-def test_write_helpers_standalone(tmp_path):
-    env_p = write_env_credentials(
-        tmp_path / "new.env", url="https://x.weaviate.cloud", api_key="k"
-    )
-    assert "WEAVIATE_URL=https://x.weaviate.cloud" in env_p.read_text(encoding="utf-8")
-    cfg_p = write_config_credentials(
-        tmp_path / "new.json", url="https://x.weaviate.cloud", api_key="k"
-    )
-    assert (
-        json.loads(cfg_p.read_text(encoding="utf-8"))["host"]
-        == "https://x.weaviate.cloud"
-    )
+@pytest.mark.parametrize("command", [["create", "--wait"], ["get", "cluster-id"]])
+@pytest.mark.parametrize(
+    ("option", "original"),
+    [
+        (None, None),
+        ("--write-env", "WEAVIATE_API_KEY=\nexport WEAVIATE_API_KEY='old-key'\n"),
+        ("--write-config", '{"auth":{"type":"user","admin":"old-key"}}'),
+        ("--write-config", '{"auth":{"type":"api_key","api_key":"old-key"}}'),
+        ("--write-config", "malformed: old-key"),
+    ],
+)
+def test_cloud_preflight_prevents_wcloud_call(
+    cli_runner, tmp_path, command, option, original
+):
+    path = tmp_path / "occupied"
+    args = ["cloud", *command]
+    if option:
+        path.write_text(original)
+        # Both paths must pass, even if stdout is also authorized.
+        other = "--write-env" if option == "--write-config" else "--write-config"
+        args.extend([other, str(tmp_path / "free"), option, str(path), "--include-key"])
+    with patch.object(CloudManager, "ensure_wcloud") as wcloud:
+        result = cli_runner.invoke(main, args)
+    assert result.exit_code == 2
+    assert "old-key" not in result.stdout + result.stderr
+    wcloud.assert_not_called()
+    if option:
+        assert path.read_text() == original
+        assert list(tmp_path.iterdir()) == [path]

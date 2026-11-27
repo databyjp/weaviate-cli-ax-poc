@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import click
@@ -10,13 +9,21 @@ from weaviate import WeaviateClient
 from weaviate.users.users import OwnUser, UserDB
 
 from weaviate_cli.completion.complete import role_name_complete
+from weaviate_cli.credentials import (
+    KeyDestination,
+    require_key_destination,
+    reserve_key_file,
+)
 from weaviate_cli.defaults import UpdateUserDefaults
 from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
     AXGroup,
+    RuntimeContext,
+    emit_error,
     emit_success,
+    emit_warning,
     get_runtime,
     handle_command_error,
     require_confirmation,
@@ -24,27 +31,68 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-def _store_user_api_key(ctx: click.Context, user_name: str, api_key: str) -> str:
-    config_manager = ctx.obj.get("config") if isinstance(ctx.obj, dict) else None
-    if not config_manager:
-        raise CLIError(
-            code="CONFIG_UNAVAILABLE",
-            message="--store option requires a config manager in the context.",
-            exit_code=ExitCode.USAGE,
-        )
-    config_path = config_manager.config_path
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    if "auth" not in config or config["auth"].get("type") != "user":
-        raise CLIError(
-            code="INVALID_CONFIG",
-            message="Cannot store API key: config file must have auth type 'user'.",
-            exit_code=ExitCode.USAGE,
-        )
-    config["auth"][user_name] = api_key
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4)
-    return str(config_path)
+def _reserve_user_destination(
+    ctx: click.Context, user_name: str, store: bool, include_key: bool
+) -> KeyDestination | None:
+    require_key_destination(store or include_key, "--store or --include-key")
+    if not store:
+        return None
+    return ctx.with_resource(
+        reserve_key_file(ctx.obj["config"].config_path, "user", user=user_name)
+    )
+
+
+def _deliver_user_key(
+    runtime: RuntimeContext,
+    command: str,
+    user_name: str,
+    key: str,
+    destination: KeyDestination | None,
+    include_key: bool,
+) -> None:
+    message = (
+        f"User '{user_name}' created."
+        if command == "user create"
+        else f"API key for user '{user_name}' rotated successfully."
+    )
+    data: dict[str, Any] = {
+        "user_name": user_name,
+        "status": "success",
+        "message": message,
+    }
+    if destination:
+        try:
+            destination.save(key)
+        except Exception:
+            # Never lose an issued key because a local writer failed unexpectedly.
+            data.update(api_key=key, credential_save_failures=[str(destination.path)])
+            error = CLIError(
+                "CREDENTIAL_SAVE_FAILED",
+                f"{message} Could not save to '{destination.path}'. Save the key from stdout; do not repeat the operation.",
+            )
+            if destination.retained_original:
+                emit_warning(
+                    runtime,
+                    f"Previous config retained at '{destination.retained_original}'.",
+                )
+            if runtime.json_output:
+                click.echo(error.message, err=True)
+            else:
+                click.echo(f"{message}\n{key}")
+            emit_error(runtime, error, command=command, data=data)
+        if destination.retained_original:
+            emit_warning(
+                runtime,
+                f"Previous config retained at '{destination.retained_original}'.",
+            )
+        data["stored_at"] = str(destination.path)
+        message += f" Saved to: {destination.path}"
+    if include_key:
+        data["api_key"] = key
+        message += f"\n{key}"
+    emit_success(
+        runtime, data, command=command, text_renderer=lambda: click.echo(message)
+    )
 
 
 @click.group("user", cls=AXGroup)
@@ -57,7 +105,10 @@ def user_group() -> None:
 @click.option(
     "--store",
     is_flag=True,
-    help="Store the API key in the config file (requires auth type 'user').",
+    help="Store the API key in an unused slot in the config file (requires auth type 'user').",
+)
+@click.option(
+    "--include-key", is_flag=True, help="Include the plaintext API key in stdout."
 )
 @click.option(
     "--json/--no-json",
@@ -67,38 +118,26 @@ def user_group() -> None:
 )
 @click.pass_context
 def create_user_cli(
-    ctx: click.Context, user_name: str, store: bool, json_output: bool | None
+    ctx: click.Context,
+    user_name: str,
+    store: bool,
+    include_key: bool,
+    json_output: bool | None,
 ) -> None:
-    """Create a dynamic user in Weaviate."""
+    """Create a user; choose --store or --include-key before issuance.
+
+    If storage fails after creation, recover the key from stdout even on exit 1.
+    """
     runtime = get_runtime(ctx, json_override=json_output)
     command = "user create"
     client: WeaviateClient | None = None
     try:
+        destination = _reserve_user_destination(ctx, user_name, store, include_key)
         client = get_client_from_context(ctx)
-        user_man = UserManager(client)
-        api_key = user_man.create_user(user_name=user_name)
-
-        payload: dict[str, Any] = {
-            "status": "success",
-            "user_name": user_name,
-            "api_key": api_key,
-        }
-        stored_at: str | None = None
-        if store:
-            stored_at = _store_user_api_key(ctx, user_name, api_key)
-            payload["stored_at"] = stored_at
-
-        def _render_text() -> None:
-            if stored_at:
-                click.echo(
-                    f"User '{user_name}' created and API key stored in config file at {stored_at}"
-                )
-            else:
-                click.echo(
-                    f"User '{user_name}' created successfully in Weaviate with api key: \n{api_key}"
-                )
-
-        emit_success(runtime, payload, command=command, text_renderer=_render_text)
+        api_key = UserManager(client).create_user(user_name=user_name)
+        _deliver_user_key(
+            runtime, command, user_name, api_key, destination, include_key
+        )
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)
     finally:
@@ -265,7 +304,12 @@ def get_user_cli(
 @click.option(
     "--store",
     is_flag=True,
-    help="Store the rotated API key in the config file (requires auth type 'user' and --rotate-api-key).",
+    help="Store the rotated key in an unused user slot in the config file.",
+)
+@click.option(
+    "--include-key",
+    is_flag=True,
+    help="Include the rotated plaintext API key in stdout.",
 )
 @click.option(
     "--json/--no-json",
@@ -281,9 +325,14 @@ def update_user_cli(
     activate: bool,
     deactivate: bool,
     store: bool,
+    include_key: bool,
     json_output: bool | None,
 ) -> None:
-    """Update a user (rotate API key, activate, or deactivate)."""
+    """Rotate a key, activate a user, or deactivate a user.
+
+    Rotation requires --store or --include-key. If storage fails after rotation,
+    recover the replacement key from stdout even on exit 1.
+    """
     runtime = get_runtime(ctx, json_override=json_output)
     command = "user update"
     client: WeaviateClient | None = None
@@ -295,6 +344,17 @@ def update_user_cli(
                 exit_code=ExitCode.USAGE,
             )
 
+        if not rotate_api_key and (store or include_key):
+            raise CLIError(
+                "USAGE_ERROR",
+                "Key destination options require --rotate-api-key.",
+                exit_code=ExitCode.USAGE,
+            )
+        destination = (
+            _reserve_user_destination(ctx, user_name, store, include_key)
+            if rotate_api_key
+            else None
+        )
         client = get_client_from_context(ctx)
         user_man = UserManager(client)
         result = user_man.update_user(
@@ -305,33 +365,9 @@ def update_user_cli(
         )
 
         if rotate_api_key and isinstance(result, str):
-            if store:
-                stored_at = _store_user_api_key(ctx, user_name, result)
-                msg = f"API key for user '{user_name}' has been rotated and stored in config file at {stored_at}"
-                emit_success(
-                    runtime,
-                    {
-                        "status": "success",
-                        "user_name": user_name,
-                        "stored_at": stored_at,
-                        "message": msg,
-                    },
-                    command=command,
-                    text_renderer=lambda: click.echo(msg),
-                )
-            else:
-                msg = f"API key for user '{user_name}' rotated successfully."
-                emit_success(
-                    runtime,
-                    {
-                        "status": "success",
-                        "user_name": user_name,
-                        "api_key": result,
-                        "message": msg,
-                    },
-                    command=command,
-                    text_renderer=lambda: click.echo(f"{msg}\n{result}"),
-                )
+            _deliver_user_key(
+                runtime, command, user_name, result, destination, include_key
+            )
         elif activate:
             msg = f"User '{user_name}' activated successfully."
             emit_success(
