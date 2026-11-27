@@ -160,6 +160,14 @@ def render_guide_markdown(
                 "- **`wcloud` binary resolution:** `WEAVIATE_WCLOUD_PATH` > `$PATH` > `~/.cache/weaviate-cli/bin/wcloud`. No silent auto-downloads in non-TTY mode; pass `--install-wcloud` or run `weaviate-cli cloud install-wcloud` for SHA-256 verified install.",
                 "",
             ]
+        elif topic == "mcp":
+            extra_notes = [
+                "## Native Weaviate MCP (`/v1/mcp`)",
+                "- **Built-in server:** Available directly on Weaviate v1.37.1+ via Streamable HTTP at `<WEAVIATE_URL>/v1/mcp` (enabled by default on Weaviate Cloud and by `weaviate-cli local start`).",
+                "- **Exposed tools:** `weaviate-collections-get-config`, `weaviate-tenants-list`, `weaviate-query-hybrid`, and `weaviate-objects-upsert` (authenticated with your Bearer API key under standard RBAC).",
+                "- **Secret safety:** `mcp config` references `${WEAVIATE_API_KEY}` (or `${env:WEAVIATE_API_KEY}` for VS Code) by default so credentials are not printed or committed; pass `--include-key` only when explicitly embedding a key into a gitignored client config.",
+                "",
+            ]
         lines = [
             f"# weaviate-cli guide: {topic}",
             "",
@@ -220,8 +228,10 @@ def render_guide_markdown(
             "weaviate-cli cloud create --wait --write-env .env",
             "weaviate-cli --env-file .env status",
             "",
-            "# Inspect target, readiness, version, identity, enabled vectorizers, and /v1/mcp",
+            "# Inspect resolved config (offline, redacted) or live cluster status & /v1/mcp",
+            "weaviate-cli --env-file .env config show",
             "weaviate-cli --env-file .env status",
+            "weaviate-cli --env-file .env mcp config --client claude-code --check",
             "",
             "# Declarative collection creation (JSON-only /v1/schema)",
             "weaviate-cli collection create --template > schema.json",

@@ -135,6 +135,8 @@ class ConfigManager:
         """Initialize config manager with explicit flags, env file, env vars, and optional config file."""
         self.user = user
         self._env: Mapping[str, str] = os.environ if env is None else env
+        self.env_file: str | None = env_file
+        self.config_file_loaded: bool = False
         self.source: str = "default_localhost"
         self.config: dict[str, Any] = {}
 
@@ -148,6 +150,7 @@ class ConfigManager:
                 )
             self.config_path: str | Path = config_file
             self.config = self._load_json_config(self.config_path)
+            self.config_file_loaded = True
             self.source = "config_file"
         else:
             home = self._env.get("HOME") or os.getenv("HOME") or str(Path.home())
@@ -156,6 +159,7 @@ class ConfigManager:
             )
             if self.config_path.exists():
                 self.config = self._load_json_config(self.config_path)
+                self.config_file_loaded = True
                 self.source = "default_config"
             else:
                 self.create_default_config()
@@ -307,6 +311,120 @@ class ConfigManager:
             val = auth_section.get(self.user)
             return str(val) if val else None
         return None
+
+    def _resolve_grpc_details(self) -> dict[str, Any]:
+        """Resolve effective gRPC host, port, and TLS mode without network calls."""
+        raw_host = str(self.config.get("host", self.default_host)).rstrip("/")
+        if raw_host == "localhost":
+            grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
+            return {"host": "localhost", "port": grpc_port, "secure": False}
+
+        if self._is_weaviate_cloud_host(raw_host):
+            hostname = (
+                urlparse(raw_host).hostname if self.__is_url(raw_host) else raw_host
+            ) or raw_host
+            raw_grpc = self.config.get("grpc_host")
+            if raw_grpc:
+                raw_grpc_str = str(raw_grpc).rstrip("/")
+                if self.__is_url(raw_grpc_str):
+                    gp = urlparse(raw_grpc_str)
+                    return {
+                        "host": gp.hostname or raw_grpc_str,
+                        "port": self.__get_port(gp),
+                        "secure": gp.scheme == "https",
+                    }
+                grpc_port = int(self.config.get("grpc_port", 443))
+                return {
+                    "host": raw_grpc_str,
+                    "port": grpc_port,
+                    "secure": grpc_port == 443,
+                }
+            return {"host": f"grpc-{hostname}", "port": 443, "secure": True}
+
+        if self.__is_url(raw_host):
+            host_parsed = urlparse(raw_host)
+            raw_grpc = self.config.get("grpc_host")
+            if raw_grpc:
+                raw_grpc_str = str(raw_grpc).rstrip("/")
+                if self.__is_url(raw_grpc_str):
+                    gp = urlparse(raw_grpc_str)
+                    grpc_port = (
+                        self.__get_port(gp)
+                        if "grpc_port" not in self.config
+                        or self.config["grpc_port"] == ""
+                        else int(self.config["grpc_port"])
+                    )
+                    return {
+                        "host": gp.hostname or raw_grpc_str,
+                        "port": grpc_port,
+                        "secure": gp.scheme == "https",
+                    }
+                grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
+                return {
+                    "host": raw_grpc_str,
+                    "port": grpc_port,
+                    "secure": grpc_port == 443,
+                }
+            grpc_secure = host_parsed.scheme == "https"
+            grpc_port = (
+                443
+                if grpc_secure
+                else int(self.config.get("grpc_port", self.default_grpc_port))
+            )
+            return {
+                "host": host_parsed.hostname or raw_host,
+                "port": grpc_port,
+                "secure": grpc_secure,
+            }
+
+        grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
+        grpc_host = str(self.config.get("grpc_host", raw_host))
+        return {"host": grpc_host, "port": grpc_port, "secure": grpc_port == 443}
+
+    def describe_connection(self) -> dict[str, Any]:
+        """Return resolved connection settings with all secret values redacted."""
+        auth_section = self.config.get("auth")
+        auth_type = "none"
+        configured_users: list[str] = []
+        if isinstance(auth_section, dict):
+            raw_type = auth_section.get("type")
+            if raw_type in {"api_key", "user"}:
+                auth_type = str(raw_type)
+            if auth_type == "user":
+                configured_users = sorted(
+                    str(k) for k in auth_section.keys() if k != "type"
+                )
+
+        api_key = self.get_api_key()
+        auth_info: dict[str, Any] = {
+            "configured": api_key is not None,
+            "type": auth_type,
+            "api_key": "***REDACTED***" if api_key is not None else None,
+        }
+        if self.user is not None:
+            auth_info["user"] = self.user
+        if configured_users:
+            auth_info["available_users"] = configured_users
+
+        raw_headers = self.config.get("headers")
+        header_names = (
+            sorted(str(k) for k in raw_headers.keys())
+            if isinstance(raw_headers, dict)
+            else []
+        )
+
+        return {
+            "target": self.target_description,
+            "rest_url": self.rest_base_url,
+            "mcp_endpoint": f"{self.rest_base_url}/v1/mcp",
+            "grpc": self._resolve_grpc_details(),
+            "source": self.source,
+            "env_file": self.env_file,
+            "config_file": str(self.config_path) if self.config_file_loaded else None,
+            "auth": auth_info,
+            "header_names": header_names,
+            "slow_connection": self.__additional_config_if_slow() is not None,
+        }
 
     def create_default_config(self) -> None:
         """Populate default localhost configuration."""

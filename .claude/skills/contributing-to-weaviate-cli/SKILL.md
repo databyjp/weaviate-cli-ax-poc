@@ -7,7 +7,7 @@ description: >-
   fix a bug in the CLI source code (weaviate_cli/ Python files); involves
   reviewing a PR that changes weaviate-cli; wants to write or update unit or
   integration tests for the CLI; asks about the Click-based architecture,
-  command-to-manager pattern, or defaults system; or the working directory is
+  AX runtime, or command-to-manager pattern; or the working directory is
   the weaviate-cli repository and Python source files need to be modified.
   Do NOT use for running weaviate-cli commands against a Weaviate cluster —
   use operating-weaviate-cli for that.
@@ -15,7 +15,7 @@ description: >-
 
 # Contributing to weaviate-cli
 
-Guide for developing, testing, and maintaining the `weaviate-cli` codebase.
+Guide for developing, testing, and maintaining the `weaviate-cli` codebase. See `AGENTS.md` for standing AX design rules and surface boundaries, and `CLAUDE.md` for concise contributor conventions.
 
 ## Development Setup
 
@@ -39,242 +39,82 @@ make all                  # format + lint + test + build-all
 
 ```
 weaviate-cli/
-  cli.py                        # Entry point: Click group, global options, command registration
+  cli.py                        # Entry point: Click AXGroup, global options, command registration
   weaviate_cli/
     __init__.py                 # Package version
-    defaults.py                 # Dataclass defaults for all commands
-    utils.py                    # Shared helpers: get_client, pp_objects, parse_permission
-    commands/                   # Click command definitions (one file per group)
-      create.py                 # create collection, tenants, data, backup, role, user, alias, replication
-      get.py                    # get collection, tenants, shards, backup, role, user, nodes, alias, replication
-      update.py                 # update collection, tenants, shards, data, user, alias
-      delete.py                 # delete collection, tenants, data, role, user, alias, replication
-      query.py                  # query data, replications, sharding-state
-      restore.py                # restore backup
-      cancel.py                 # cancel backup, replication
-      assign.py                 # assign role, permission
-      revoke.py                 # revoke role, permission
-      benchmark.py              # benchmark qps
+    runtime.py                  # AXGroup, DEFAULT_CONTEXT_SETTINGS, JSON envelope, warnings, --yes guard
+    errors.py                   # ExitCode (0..5), CLIError, classify_exception()
+    defaults.py                 # Dataclass defaults for admin/DDL commands
+    utils.py                    # Shared helpers: get_client_from_context, parse_permission
+    specs/
+      collection.py             # Declarative /v1/schema validation + live module checks
+    commands/                   # Click noun-verb command groups & top-level commands
+      local.py                  # local start/template/stop/status/logs/destroy
+      cloud.py                  # cloud install-wcloud/login/whoami/logout/regions/create/list/get/status
+      config.py                 # config show
+      mcp.py                    # mcp config
+      status.py                 # status
+      guide.py                  # guide [--schema] [topic]
+      collection.py             # collection create/list/get/update/delete
+      tenant.py                 # tenant create/list/get/update/delete
+      alias.py                  # alias create/list/get/update/delete
+      node.py                   # node list
+      shard.py                  # shard list/update/state
+      replication.py            # replication create/list/get/cancel/delete
+      backup.py                 # backup create/get/restore/cancel
+      export.py                 # export create/get/cancel
+      role.py                   # role create/list/get/delete/assign/revoke/add-permission/revoke-permission
+      user.py                   # user create/list/get/update/delete
     managers/                   # Business logic (one file per domain)
-      config_manager.py         # ConfigManager: config loading, client creation
-      collection_manager.py     # CollectionManager: CRUD collections
-      tenant_manager.py         # TenantManager: CRUD tenants
-      data_manager.py           # DataManager: ingest/update/delete data
-      backup_manager.py         # BackupManager: backup/restore operations
-      role_manager.py           # RoleManager: RBAC role operations
-      user_manager.py           # UserManager: RBAC user operations
-      node_manager.py           # NodeManager: node information
-      shard_manager.py          # ShardManager: shard operations
-      cluster_manager.py        # ClusterManager: replication operations
-      alias_manager.py          # AliasManager: alias operations
-      benchmark_manager.py      # BenchmarkManager: QPS benchmarks
+      config_manager.py         # ConfigManager: precedence, --env-file, client creation, describe_connection
+      local_manager.py          # LocalManager: Docker Compose v2 lifecycle + config/env redaction
+      cloud_manager.py          # CloudManager: wcloud resolution, SHA-256 install, credential capture
+      status_manager.py         # StatusManager + probe_mcp_endpoint
+      collection_manager.py     # CollectionManager
+      tenant_manager.py         # TenantManager
+      alias_manager.py          # AliasManager
+      node_manager.py           # NodeManager
+      shard_manager.py          # ShardManager
+      cluster_manager.py        # ClusterManager (replication)
+      backup_manager.py         # BackupManager
+      export_manager.py         # ExportManager
+      role_manager.py           # RoleManager
+      user_manager.py           # UserManager
     completion/                 # Shell completion helpers
-    datasets/                   # Built-in datasets (Movies)
     types/                      # Type definitions
   test/
     unittests/
-      conftest.py               # Fixtures: mock_client, mock_config, mock_click_context
-      test_cli.py               # CliRunner tests for CLI entry point
-      test_defaults.py          # Defaults dataclass tests
-      test_utils.py             # Utility function tests
-      test_managers/             # Manager unit tests (one per manager)
-    integration/
-      test_integration.py       # Integration tests (requires running cluster)
-      test_auth_integration.py  # RBAC integration tests (requires cluster + RBAC)
-      test_data_integration.py  # Data integration tests
+      conftest.py               # Shared fixtures
+      test_cli.py               # Command tree, kebab-case, collection/tenant/config contracts
+      test_ax_rollout.py        # Cross-command -h/--json/envelope/exit-code/--yes contract suite
+      test_local.py             # Local Docker manager + CLI tests
+      test_cloud.py             # Cloud wcloud delegation + credential capture tests
+      test_config_mcp.py        # config show + mcp config tests
+      test_managers/            # Manager unit tests
+    integration/                # Integration tests (require running Weaviate cluster)
 ```
 
-See [references/architecture.md](references/architecture.md) for detailed class hierarchy and patterns.
+## AX Command Contract
 
-## Architecture Pattern: Commands -> Managers
+Every command added or modified must follow these rules:
 
-Every CLI operation follows this pattern:
-
-1. **`cli.py`**: Top-level Click group registers command groups
-2. **`commands/<group>.py`**: Click decorators define options, validate input, get client from context, call manager
-3. **`managers/<domain>_manager.py`**: Business logic, Weaviate client calls, output formatting
-4. **`defaults.py`**: Dataclass with default values for each command
-
-```
-cli.py (main group)
-  -> commands/create.py (create group)
-    -> @create.command("collection") (Click decorators + options)
-      -> CollectionManager(client).create_collection(...) (business logic)
-        -> defaults.py::CreateCollectionDefaults (default values)
-```
-
-The `ConfigManager` is stored in the Click context (`ctx.obj["config"]`). Commands extract the client via `get_client_from_context(ctx)` from `utils.py`.
-
-## Defaults System
-
-All command defaults live in `weaviate_cli/defaults.py` as dataclasses:
-
-```python
-@dataclass
-class CreateCollectionDefaults:
-    collection: str = "Movies"
-    replication_factor: int = 3
-    vector_index: str = "hnsw"
-    multitenant: bool = False
-    # ... etc
-```
-
-Click options reference these: `default=CreateCollectionDefaults.collection`. This keeps defaults centralized and testable.
-
-When adding a new command, always create a corresponding defaults dataclass.
-
-## Issue Tracking
-
-By default, every non-trivial task (new feature, bug fix, improvement) should follow the
-GitHub Issue workflow defined in `references/issue-workflow.md` (including any documented
-exceptions, such as documentation-only or agent/Claude-specific changes). This provides:
-- A record of what was added in each release
-- A link between issues and PRs for code review
-- Visibility into work in progress
-
-**Default workflow for non-trivial changes:**
-1. Create issue with `draft` label via `gh issue create --repo weaviate/weaviate-cli`
-2. Plan and implement the change
-3. Create a PR with `Closes #N` in the body
-4. Remove `draft` label when PR is ready for review
-
-See [references/issue-workflow.md](references/issue-workflow.md) for full details,
-templates, examples, and the authoritative list of exceptions. If this section ever
-conflicts with that reference, defer to `references/issue-workflow.md`.
-
-## Adding a New Command
-
-Step-by-step guide: see [references/adding-commands.md](references/adding-commands.md).
-
-Summary:
-1. Create a GitHub Issue to track the work (see Issue Tracking above)
-2. Add a defaults dataclass in `defaults.py`
-3. Add Click command in the appropriate `commands/<group>.py`
-4. Add manager method in `managers/<domain>_manager.py`
-5. Add `--json` flag (mandatory for all commands)
-6. Add unit test in `test/unittests/test_managers/`
-7. Update the operating skill documentation
-8. Create a PR linked to the issue
-
-## JSON Output Convention
-
-Every command **must** support `--json`:
-
-**In the Click command:**
-```python
-@click.option("--json", "json_output", is_flag=True, default=False, help="Output in JSON format.")
-```
-
-Note: The parameter is named `json_output` (not `json`) to avoid shadowing Python's `json` module.
-
-**In the manager**, use `print_json_or_text()` from `utils.py`:
-```python
-from weaviate_cli.utils import print_json_or_text
-
-print_json_or_text(
-    data={"collections": collection_list, "total": len(collection_list)},
-    json_output=json_output,
-    text_fn=lambda: click.echo(formatted_text),
-)
-```
-
-**Success JSON shape:**
-```json
-{"status": "success", "message": "..."}
-```
-or structured data with domain-specific fields.
-
-**Error output:** Always `click.echo(f"Error: {e}")` + `sys.exit(1)`.
-
-## Testing
-
-### Unit Tests
-
-Use `CliRunner` for CLI-level tests and `MagicMock` for manager tests:
-
-```python
-# CLI test (test/unittests/test_cli.py)
-from click.testing import CliRunner
-from cli import main
-
-def test_create_collection(cli_runner):
-    result = cli_runner.invoke(main, ["create", "collection", "--json"])
-    assert result.exit_code == 0
-
-# Manager test (test/unittests/test_managers/test_collection_manager.py)
-def test_create_collection(mock_client):
-    mock_client.collections.exists.side_effect = [False, True]
-    manager = CollectionManager(mock_client)
-    manager.create_collection(collection="Test", replication_factor=3)
-    mock_client.collections.create.assert_called_once()
-```
-
-Fixtures in `conftest.py` (shared across all unit tests):
-- `mock_client` -- `MagicMock(spec=weaviate.WeaviateClient)`
-- `mock_config` -- `MagicMock(spec=ConfigManager)`
-- `mock_click_context` -- context with mock config in `ctx.obj`
-
-Note: `cli_runner` is defined locally in `test/unittests/test_cli.py`, not in `conftest.py`.
-
-### Integration Tests
-
-Require a running Weaviate cluster (typically via `weaviate-local-k8s`):
-```bash
-pytest test/integration/test_integration.py
-pytest test/integration/test_auth_integration.py  # Requires RBAC-enabled cluster
-```
-
-See [references/testing.md](references/testing.md) for full patterns.
-
-## CI Pipeline
-
-```
-lint-and-format (make lint + make typecheck + build check)
-  -> unit-tests (Python 3.9-3.13, matrix)
-    -> integration-tests (latest Weaviate, weaviate-local-k8s, Python 3.9-3.13)
-    -> integration-auth-tests (RBAC-enabled cluster, Python 3.9-3.13)
-```
-
-- Linting must pass before unit tests run
-- Unit tests must pass before integration tests run
-- Integration tests use `weaviate/weaviate-local-k8s@v2` GitHub Action
-- Auth integration tests create a config with `admin-key` API key
+1. **Noun-verb grammar & kebab-case flags**: Register under `<resource> <action>` with `kebab-case` long options (`test_all_cli_options_are_kebab_case` enforces this).
+2. **Short help & JSON option**: Groups use `cls=AXGroup`; leaf commands use `context_settings=DEFAULT_CONTEXT_SETTINGS` (`-h`/`--help`) and accept `@click.option("--json/--no-json", "json_output", default=None, ...)` (`test_every_command_supports_short_help_and_json_flag` enforces this).
+3. **Envelope & stream hygiene**:
+   - Resolve runtime with `runtime = get_runtime(ctx, json_override=json_output)`.
+   - Emit results with `emit_success(runtime, data, command=..., text_renderer=...)`.
+   - Emit warnings with `emit_warning(runtime, msg)` (always `stderr`).
+   - Handle all exceptions via `handle_command_error(ctx, runtime, exc, command=...)` so `ExitCode` (`0..5`) and structured `error` payloads apply uniformly.
+4. **Destructive guards**: Require `--yes` via `require_confirmation(yes, action=..., target=...)` on bulk or destructive actions.
+5. **Client lifecycle**: Open client inside `try:` and always close in `finally:`.
+6. **Secret safety**: Never print plaintext API keys or secret env vars unless explicitly requested (and warn on `stderr`).
 
 ## Code Review Checklist
 
-1. GitHub Issue exists and is linked to the PR (`Closes #N`)
-2. New command has `--json` support
-3. Defaults dataclass added/updated in `defaults.py`
-4. Unit test covers happy path and error cases
-5. Ruff lint and formatting pass (`make lint`)
-6. No hardcoded paths or credentials
-7. Error messages follow `Error: <description>` pattern
-8. Client is properly closed in `finally` block
-9. Manager method handles both JSON and text output
-
-See [references/code-review.md](references/code-review.md) for detailed checklist.
-
-## Maintaining Skills
-
-When adding new commands or options to `weaviate-cli`, update the agent skills:
-
-1. **Operating skill** (`.claude/skills/operating-weaviate-cli/`):
-   - Add the new command to the **Command Reference** section in `SKILL.md`
-   - Update or create the relevant reference file in `references/`
-   - Update the **Command Groups** table if a new group is added
-   - Update **Workflow Dependencies** if the command introduces new dependencies
-
-2. **Contributing skill** (`.claude/skills/contributing-to-weaviate-cli/`):
-   - Update `references/architecture.md` if new files/modules are added
-   - Update `references/adding-commands.md` if patterns change
-   - Update `references/testing.md` if test infrastructure changes
-
-3. **CLAUDE.md**: Update if development commands or conventions change
-
-## References
-
-- [references/architecture.md](references/architecture.md) -- File-by-file breakdown, class hierarchy, utils helpers
-- [references/adding-commands.md](references/adding-commands.md) -- Complete worked example for new commands
-- [references/testing.md](references/testing.md) -- Test fixtures, patterns, CI details
-- [references/code-review.md](references/code-review.md) -- PR checklist, common pitfalls, conventions
-- [references/issue-workflow.md](references/issue-workflow.md) -- GitHub Issue creation, tracking, and PR linking
+1. `noun-verb` command path and `kebab-case` options
+2. `-h`/`--help` and `--json/--no-json` supported on every leaf command
+3. Output uses `emit_success` / `emit_warning` / `handle_command_error` (no raw `print` or `click.echo("Error: ...")` on stdout)
+4. Destructive/bulk actions enforce `--yes`
+5. Unit tests cover happy path, JSON envelope, text output, and error exit codes
+6. `make lint`, `make typecheck`, and `make test` all pass with 0 errors
+7. Update `test/unittests/test_cli.py`, `weaviate_cli/commands/guide.py` (if needed), and `.claude/skills/operating-weaviate-cli/SKILL.md`

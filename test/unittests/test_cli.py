@@ -74,6 +74,8 @@ def test_main_passes_env_file_to_config_manager(cli_runner, tmp_path):
 
 def test_main_noun_verb_commands_registered():
     expected_groups = {
+        "config": {"show"},
+        "mcp": {"config"},
         "local": {"start", "template", "stop", "status", "logs", "destroy"},
         "cloud": {
             "install-wcloud",
