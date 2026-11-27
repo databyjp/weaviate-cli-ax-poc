@@ -451,3 +451,24 @@ def test_update_collection_from_spec_and_named_vector_flags(mock_client):
         manager.update_collection(collection="Articles", vector_index="hnsw_pathseer")
     assert multi_exc.value.code == "MISSING_VECTOR_NAME"
     assert multi_exc.value.exit_code == ExitCode.USAGE
+
+
+def test_delete_property_index(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+    mock_col = MagicMock()
+    mock_col.config.delete_property_index.return_value = True
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+    res = manager.delete_property_index("Articles", "price", "range-filters")
+    assert res == {
+        "collection": "Articles",
+        "property": "price",
+        "index_type": "rangeFilters",
+        "deleted": True,
+    }
+    mock_col.config.delete_property_index.assert_called_once_with(
+        property_name="price", index_name="rangeFilters"
+    )

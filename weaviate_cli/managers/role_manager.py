@@ -179,6 +179,26 @@ class RoleManager:
                 f"Error revoking permission '{permission}' from role '{role_name}': {e}"
             ) from e
 
+    def has_permissions(self, permission: tuple[str, ...], role_name: str) -> bool:
+        """Check whether a role has all specified permissions."""
+        try:
+            rbac_permissions = []
+            for perm in permission:
+                parsed = parse_permission(perm)
+                if isinstance(parsed, list):
+                    rbac_permissions.extend(parsed)
+                else:
+                    rbac_permissions.append(parsed)
+            return bool(
+                self.client.roles.has_permissions(
+                    permissions=rbac_permissions, role=role_name
+                )
+            )
+        except Exception as e:
+            raise Exception(
+                f"Error checking permission '{permission}' on role '{role_name}': {e}"
+            ) from e
+
     @staticmethod
     def role_to_dict(role: Role) -> dict:
         """Convert a Role to a JSON-serializable dict."""

@@ -93,7 +93,7 @@ weaviate-cli [--env-file .env] status
 | `mcp` | `config` | Generate Streamable HTTP `/v1/mcp` config (`generic`, `claude-code`, `claude-desktop`, `cursor`, `vscode`) with optional `--check` |
 | `local` | `start`, `template`, `stop`, `status`, `logs`, `destroy` | Managed local Docker Compose cluster (`weaviate-cli-local`) |
 | `cloud` | `install-wcloud`, `login`, `whoami`, `logout`, `regions`, `create`, `list`, `get`, `status` | Weaviate Cloud lifecycle delegated to `wcloud` |
-| `collection` | `create`, `list`, `get`, `add-property`, `add-vector`, `delete-vector`, `update`, `delete` | Declarative JSON collection DDL, schema evolution, and config updates |
+| `collection` | `create`, `list`, `get`, `add-property`, `add-vector`, `delete-vector`, `delete-property-index`, `update`, `delete` | Declarative JSON collection DDL, schema evolution, and config updates |
 | `tenant` | `create`, `list`, `get`, `update`, `delete` | Multi-tenant lifecycle (`hot`/`active`, `cold`/`inactive`, `frozen`/`offloaded`) |
 | `alias` | `create`, `list`, `get`, `update`, `delete` | Zero-downtime collection alias management |
 | `node` | `list`, `stats` | Cluster node health, versions, shards (queue length, compression), and Raft consensus statistics |
@@ -101,7 +101,7 @@ weaviate-cli [--env-file .env] status
 | `replication` | `create`, `list`, `get`, `cancel`, `delete` | Cross-node shard `COPY`/`MOVE` replication operations |
 | `backup` | `list`, `create`, `get`, `restore`, `cancel` | Cluster/collection/RBAC backup and restore (`s3`, `gcs`, `azure`, `filesystem`) |
 | `export` | `create`, `get`, `cancel` | Collection Parquet export (`filesystem`, `s3`, `gcs`, `azure`) |
-| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission` | RBAC role and permission administration (users & OIDC groups) |
+| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission`, `check-permission` | RBAC role and permission administration (users & OIDC groups) |
 | `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management, API key rotation/revocation, and audit metadata |
 | `group` | `list`, `get`, `assign-role`, `revoke-role` | OIDC group RBAC role assignments |
 

@@ -1001,6 +1001,93 @@ def delete_vector_cli(
 
 
 @collection_group.command(
+    "delete-property-index",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli collection delete-property-index Articles body --index-type searchable --yes\n"
+        "  weaviate-cli collection delete-property-index Articles price --index-type range-filters --yes"
+    ),
+)
+@click.argument("collection", shell_complete=collection_name_complete)
+@click.argument("property_name")
+@click.option(
+    "--index-type",
+    required=True,
+    type=click.Choice(
+        ["searchable", "filterable", "range-filters"], case_sensitive=False
+    ),
+    help="Property inverted index type to drop.",
+)
+@click.option(
+    "-y",
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm destructive property index deletion (required).",
+)
+@click.option(
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
+)
+@click.pass_context
+def delete_property_index_cli(
+    ctx: click.Context,
+    collection: str,
+    property_name: str,
+    index_type: str,
+    yes: bool,
+    json_output: bool | None,
+) -> None:
+    """Drop an inverted index from an existing property (requires --yes)."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "collection delete-property-index"
+
+    if not yes:
+        emit_error(
+            runtime,
+            CLIError(
+                code="CONFIRMATION_REQUIRED",
+                message=(
+                    f"Dropping '{index_type}' index on property '{property_name}' of collection "
+                    f"'{collection}' is destructive and requires --yes."
+                ),
+                exit_code=ExitCode.USAGE,
+                hint=(
+                    f"Re-run with 'weaviate-cli collection delete-property-index {collection} "
+                    f"{property_name} --index-type {index_type} --yes' after confirming."
+                ),
+            ),
+            command=command,
+        )
+
+    client: WeaviateClient | None = None
+    try:
+        client = get_client_from_context(ctx)
+        collection_man = CollectionManager(client)
+        result = collection_man.delete_property_index(
+            collection, property_name, index_type
+        )
+        emit_success(
+            runtime,
+            result,
+            command=command,
+            text_renderer=lambda: click.echo(
+                f"Property index '{result['index_type']}' on '{collection}.{property_name}' "
+                f"{'deleted' if result['deleted'] else 'was not present'}."
+            ),
+        )
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
+    finally:
+        if client is not None:
+            client.close()
+
+
+@collection_group.command(
     "update",
     context_settings=DEFAULT_CONTEXT_SETTINGS,
     epilog=(

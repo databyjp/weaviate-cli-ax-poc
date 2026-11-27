@@ -504,3 +504,64 @@ def revoke_permission_cli(
     finally:
         if client is not None:
             client.close()
+
+
+@role_group.command(
+    "check-permission",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli role check-permission viewer -p 'read_collections:Articles'\n"
+        "  weaviate-cli role check-permission mcp-agent -p read_mcp -p 'read_data:Articles'"
+    ),
+)
+@click.argument("role_name", shell_complete=role_name_complete)
+@click.option(
+    "-p",
+    "--permission",
+    multiple=True,
+    required=True,
+    help=_SHORT_PERMISSION_HELP,
+)
+@click.option(
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
+)
+@click.pass_context
+def check_permission_cli(
+    ctx: click.Context,
+    role_name: str,
+    permission: tuple[str, ...],
+    json_output: bool | None,
+) -> None:
+    """Check whether a role includes one or more permissions."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role check-permission"
+    client: WeaviateClient | None = None
+    try:
+        client = get_client_from_context(ctx)
+        role_manager = RoleManager(client)
+        allowed = role_manager.has_permissions(
+            permission=permission, role_name=role_name
+        )
+        data = {
+            "role": role_name,
+            "permissions": list(permission),
+            "has_permissions": allowed,
+        }
+        emit_success(
+            runtime,
+            data,
+            command=command,
+            text_renderer=lambda: click.echo(
+                f"Role '{role_name}' {'has' if allowed else 'does NOT have'} the requested permission(s)."
+            ),
+        )
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
+    finally:
+        if client is not None:
+            client.close()

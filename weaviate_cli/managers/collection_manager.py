@@ -699,6 +699,50 @@ class CollectionManager:
             ),
         }
 
+    def delete_property_index(
+        self,
+        collection: str,
+        property_name: str,
+        index_name: str,
+    ) -> dict[str, Any]:
+        """Drop an inverted index (searchable, filterable, or rangeFilters) from a property."""
+        index_map = {
+            "searchable": "searchable",
+            "filterable": "filterable",
+            "range-filters": "rangeFilters",
+            "rangefilters": "rangeFilters",
+        }
+        resolved = index_map.get(index_name.lower())
+        if resolved is None:
+            raise CLIError(
+                code="INVALID_INDEX_TYPE",
+                message=f"Invalid property index type '{index_name}'.",
+                exit_code=ExitCode.USAGE,
+                hint="Valid index types: searchable, filterable, range-filters.",
+            )
+
+        if not self.client.collections.exists(collection):
+            raise CLIError(
+                code="COLLECTION_NOT_FOUND",
+                message=f"Collection '{collection}' does not exist.",
+                exit_code=ExitCode.NOT_FOUND,
+                hint="Run 'weaviate-cli collection list' to see existing collections.",
+            )
+
+        col_obj: Collection = self.client.collections.get(collection)
+        deleted = bool(
+            col_obj.config.delete_property_index(
+                property_name=property_name,
+                index_name=resolved,  # type: ignore[arg-type]
+            )
+        )
+        return {
+            "collection": collection,
+            "property": property_name,
+            "index_type": resolved,
+            "deleted": deleted,
+        }
+
     def update_collection_from_spec(
         self,
         collection: str,

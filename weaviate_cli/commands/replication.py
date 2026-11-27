@@ -78,6 +78,19 @@ def replication_group() -> None:
     help="The type of replication to perform (default: 'MOVE').",
 )
 @click.option(
+    "--wait",
+    is_flag=True,
+    default=False,
+    help="Wait for the replication operation to reach READY before returning.",
+)
+@click.option(
+    "--timeout",
+    type=float,
+    default=300.0,
+    show_default=True,
+    help="Maximum seconds to wait when --wait is enabled.",
+)
+@click.option(
     "--json/--no-json",
     "json_output",
     default=None,
@@ -91,6 +104,8 @@ def create_replication_cli(
     source_node: str,
     target_node: str,
     type_: str,
+    wait: bool,
+    timeout: float,
     json_output: bool | None,
 ) -> None:
     """Create and start a shard replication operation."""
@@ -107,6 +122,18 @@ def create_replication_cli(
             target_node=target_node,
             type_=type_,
         )
+        if wait:
+            final_op = manager.wait_for_replication(uuid, timeout=timeout)
+            data = _replication_to_dict(final_op, include_history=False)
+            data["waited"] = True
+            msg = f"Replication '{uuid}' completed with status: {data['status']}."
+            emit_success(
+                runtime,
+                data,
+                command=command,
+                text_renderer=lambda: click.echo(msg),
+            )
+            return
         msg = f"Replication successfully started with UUID: {uuid}."
         emit_success(
             runtime,
@@ -169,23 +196,15 @@ def list_replications_cli(
                 message="Please provide --collection when specifying --shard.",
                 exit_code=ExitCode.USAGE,
             )
-        if target_node and (collection or shard):
-            raise CLIError(
-                code="CONFLICTING_OPTIONS",
-                message="Provide either --collection/--shard or --target-node, not both.",
-                exit_code=ExitCode.USAGE,
-            )
 
         client = get_client_from_context(ctx)
         manager = ClusterManager(client, click.echo)
-        if collection and not shard:
-            ops = manager.query_replications_by_collection(collection, history)
-        elif collection and shard:
-            ops = manager.query_replications_by_shard(collection, shard, history)
-        elif target_node:
-            ops = manager.query_replications_by_node(target_node, history)
-        else:
-            ops = manager.query_all_replications(history)
+        ops = manager.query_replications(
+            collection=collection,
+            shard=shard,
+            target_node=target_node,
+            include_history=history,
+        )
 
         reps = [_replication_to_dict(op, include_history=history) for op in (ops or [])]
         emit_success(

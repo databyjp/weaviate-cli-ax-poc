@@ -138,6 +138,11 @@ def render_template_compose_yaml() -> str:
         '      # AUTHORIZATION_RBAC_ENABLED: "true"\n'
         '      # AUTHORIZATION_RBAC_ROOT_USERS: "admin"\n'
         "\n"
+        "      # Dynamic runtime configuration overrides (optional, Weaviate v1.30+):\n"
+        '      # RUNTIME_OVERRIDES_ENABLED: "true"\n'
+        '      # RUNTIME_OVERRIDES_PATH: "/etc/weaviate/runtime-overrides.yaml"\n'
+        '      # RUNTIME_OVERRIDES_LOAD_INTERVAL: "30s"\n'
+        "\n"
         "  vectorizer:\n"
         f"    image: {TRANSFORMERS_IMAGE}\n"
         "    environment:\n"

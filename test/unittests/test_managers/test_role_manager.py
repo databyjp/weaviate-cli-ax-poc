@@ -308,3 +308,28 @@ def test_role_to_dict_and_print_role_include_mcp_groups_replicate_tenant_data(
     assert "create_mcp, read_mcp, update_mcp" in out
     assert "Groups Permissions:" in out
     assert "Group: engineering (oidc)" in out
+
+
+def test_role_check_permission_manager_and_cli(role_manager, mock_client):
+    from click.testing import CliRunner
+
+    from cli import main
+
+    mock_client.roles.has_permissions.return_value = True
+    assert role_manager.has_permissions(("read_mcp",), "mcp-ops") is True
+    mock_client.roles.has_permissions.assert_called_once()
+
+    runner = CliRunner(mix_stderr=False)
+    cfg = MagicMock()
+    cfg.get_client.return_value = mock_client
+    with patch("cli.ConfigManager", return_value=cfg):
+        res = runner.invoke(
+            main, ["role", "check-permission", "mcp-ops", "-p", "read_mcp"]
+        )
+    assert res.exit_code == 0, res.stdout
+    data = json.loads(res.stdout)["data"]
+    assert data == {
+        "role": "mcp-ops",
+        "permissions": ["read_mcp"],
+        "has_permissions": True,
+    }
