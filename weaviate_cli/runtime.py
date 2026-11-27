@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 from collections.abc import Callable, Sequence
@@ -149,6 +151,47 @@ def handle_command_error(
     target, source = get_config_meta(ctx)
     cli_err = classify_exception(exc, target=target, config_source=source)
     emit_error(runtime, cli_err, command=command)
+
+
+def emit_captured_json_or_text(
+    runtime: RuntimeContext,
+    *,
+    command: str,
+    invoke: Callable[[bool], Any],
+) -> None:
+    """Bridge managers that emit raw JSON/text to stdout into the AX JSON envelope."""
+    if not runtime.json_output:
+        invoke(False)
+        return
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        invoke(True)
+    raw = buf.getvalue().strip()
+    data: Any = json.loads(raw) if raw else {}
+    emit_success(runtime, data, command=command)
+
+
+def require_confirmation(
+    runtime: RuntimeContext,
+    *,
+    yes: bool,
+    command: str,
+    message: str,
+    hint: str,
+) -> None:
+    """Enforce --yes confirmation on destructive or bulk-mutating operations."""
+    if not yes:
+        emit_error(
+            runtime,
+            CLIError(
+                code="CONFIRMATION_REQUIRED",
+                message=message,
+                exit_code=ExitCode.USAGE,
+                hint=hint,
+            ),
+            command=command,
+        )
 
 
 def _infer_json_from_argv(args: Sequence[str] | None) -> bool:

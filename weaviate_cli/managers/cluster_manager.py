@@ -32,28 +32,32 @@ class ClusterManager:
             )
             return str(uuid)
         except Exception as e:
-            raise Exception(f"Error starting replication: {e}")
+            raise Exception(f"Error starting replication: {e}") from e
 
     def delete_replication(self, op_id: str) -> None:
         """Delete a replication in Weaviate."""
         try:
             self.client.cluster.replications.delete(uuid=op_id)
         except Exception as e:
-            raise Exception(f"Error deleting replication with UUID '{op_id}': {e}")
+            raise Exception(
+                f"Error deleting replication with UUID '{op_id}': {e}"
+            ) from e
 
     def delete_all_replication(self) -> None:
         """Delete all replications in Weaviate."""
         try:
             self.client.cluster.replications.delete_all()
         except Exception as e:
-            raise Exception(f"Error deleting all replications: {e}")
+            raise Exception(f"Error deleting all replications: {e}") from e
 
     def cancel_replication(self, op_id: str) -> None:
         """Cancel a replication operation in Weaviate."""
         try:
             self.client.cluster.replications.cancel(uuid=op_id)
         except Exception as e:
-            raise Exception(f"Error cancelling replication with UUID '{op_id}': {e}")
+            raise Exception(
+                f"Error cancelling replication with UUID '{op_id}': {e}"
+            ) from e
 
     def get_replication(self, op_id: str, include_history: bool):
         """Get details of a replication operation in Weaviate."""
@@ -62,14 +66,16 @@ class ClusterManager:
                 uuid=op_id, include_history=include_history
             )
         except Exception as e:
-            raise Exception(f"Error getting replication with UUID '{op_id}': {e}")
+            raise Exception(
+                f"Error getting replication with UUID '{op_id}': {e}"
+            ) from e
 
     def get_all_replications(self):
         """Get all replication operations in Weaviate."""
         try:
             return self.client.cluster.replications.list_all()
         except Exception as e:
-            raise Exception(f"Error getting replications: {e}")
+            raise Exception(f"Error getting replications: {e}") from e
 
     def query_replications_by_collection(self, collection: str, include_history: bool):
         """Query replications by collection."""
@@ -80,7 +86,7 @@ class ClusterManager:
         except Exception as e:
             raise Exception(
                 f"Error querying replications for collection '{collection}': {e}"
-            )
+            ) from e
 
     def query_replications_by_shard(
         self, collection: str, shard: str, include_history: bool
@@ -93,7 +99,7 @@ class ClusterManager:
         except Exception as e:
             raise Exception(
                 f"Error querying replications for collection '{collection}' and shard '{shard}': {e}"
-            )
+            ) from e
 
     def query_replications_by_node(self, node: str, include_history: bool):
         """Query replications by node."""
@@ -102,7 +108,9 @@ class ClusterManager:
                 target_node=node, include_history=include_history
             )
         except Exception as e:
-            raise Exception(f"Error querying replications for node '{node}': {e}")
+            raise Exception(
+                f"Error querying replications for node '{node}': {e}"
+            ) from e
 
     def query_all_replications(self, include_history: bool):
         """Get all replication operations in Weaviate."""
@@ -111,7 +119,7 @@ class ClusterManager:
                 include_history=include_history
             )
         except Exception as e:
-            raise Exception(f"Error getting replications: {e}")
+            raise Exception(f"Error getting replications: {e}") from e
 
     def print_replication(
         self, replication: wvor.ReplicateOperation, json_output: bool = False
@@ -252,7 +260,7 @@ class ClusterManager:
         except Exception as e:
             raise Exception(
                 f"Error querying sharding state for collection '{collection}' and shard '{shard}': {e}"
-            )
+            ) from e
 
     def print_sharding_state(
         self, sharding_state: wvoc.ShardingState, json_output: bool = False

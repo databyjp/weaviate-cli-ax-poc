@@ -32,7 +32,7 @@ def test_check_host_docker_internal(mock_socket):
 
     # Test successful connection
     mock_socket.return_value = MagicMock()
-    assert config._ConfigManager__check_host_docker_internal() is True
+    assert config._ConfigManager__check_host_docker_internal() is True  # type: ignore[attr-defined]
 
 
 @patch("socket.create_connection")
@@ -41,7 +41,7 @@ def test_check_host_docker_internal_failed(mock_socket):
 
     # Test failed connection
     mock_socket.side_effect = OSError()
-    assert config._ConfigManager__check_host_docker_internal() is False
+    assert config._ConfigManager__check_host_docker_internal() is False  # type: ignore[attr-defined]
 
 
 def test_init_with_user():

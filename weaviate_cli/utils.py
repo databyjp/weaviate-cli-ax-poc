@@ -303,7 +303,7 @@ def parse_permission(perm: str) -> PermissionsCreateType:
                 action=actions,
                 resource=resource,
                 collection=collection,
-                tenant=tenant,
+                tenant=tenant if tenant is not None else "*",
                 alias=alias,
                 role=role,
                 role_scope=role_scope,

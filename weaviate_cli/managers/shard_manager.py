@@ -7,6 +7,7 @@ from weaviate_cli.defaults import (
     GetShardsDefaults,
     UpdateShardsDefaults,
 )
+from weaviate_cli.errors import CLIError, ExitCode
 
 
 class ShardManager:
@@ -27,7 +28,11 @@ class ShardManager:
 
         if collection is not None:
             if not self.client.collections.exists(collection):
-                raise Exception(f"Collection '{collection}' does not exist")
+                raise CLIError(
+                    code="COLLECTION_NOT_FOUND",
+                    message=f"Collection '{collection}' does not exist",
+                    exit_code=ExitCode.NOT_FOUND,
+                )
             col_obj = self.client.collections.get(collection)
             shards = col_obj.config.get_shards()
             if json_output:
@@ -134,9 +139,17 @@ class ShardManager:
             raise ValueError("Shard status must be READY or READONLY.")
         if all:
             if collection is not None:
-                raise Exception("Cannot use 'all' flag with specific collection")
+                raise CLIError(
+                    code="CONFLICTING_OPTIONS",
+                    message="Cannot use 'all' flag with specific collection",
+                    exit_code=ExitCode.USAGE,
+                )
             if shards is not None:
-                raise Exception("Cannot use 'all' flag with specific shards")
+                raise CLIError(
+                    code="CONFLICTING_OPTIONS",
+                    message="Cannot use 'all' flag with specific shards",
+                    exit_code=ExitCode.USAGE,
+                )
 
             all_collections = self.client.collections.list_all()
             updated = []
@@ -161,7 +174,11 @@ class ShardManager:
                 )
         elif collection is not None:
             if not self.client.collections.exists(collection):
-                raise Exception(f"Collection '{collection}' does not exist")
+                raise CLIError(
+                    code="COLLECTION_NOT_FOUND",
+                    message=f"Collection '{collection}' does not exist",
+                    exit_code=ExitCode.NOT_FOUND,
+                )
             col_obj = self.client.collections.get(collection)
             col_shards = [s.name for s in col_obj.config.get_shards()]
             if not shards:
@@ -170,8 +187,10 @@ class ShardManager:
                 list_shards = str.split(shards, ",")
                 for shard in list_shards:
                     if shard not in col_shards:
-                        raise Exception(
-                            f"Shard '{shard}' does not exist in collection '{collection}'"
+                        raise CLIError(
+                            code="SHARD_NOT_FOUND",
+                            message=f"Shard '{shard}' does not exist in collection '{collection}'",
+                            exit_code=ExitCode.NOT_FOUND,
                         )
 
             col_obj.config.update_shards(status, list_shards)

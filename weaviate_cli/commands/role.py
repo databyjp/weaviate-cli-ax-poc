@@ -1,5 +1,6 @@
-import json
-import sys
+"""Click commands for the 'role' resource group."""
+
+from __future__ import annotations
 
 import click
 from weaviate import WeaviateClient
@@ -7,17 +8,35 @@ from weaviate.rbac.models import Role
 
 from weaviate_cli.completion.complete import role_name_complete
 from weaviate_cli.defaults import PERMISSION_HELP_STRING
+from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.role_manager import RoleManager
 from weaviate_cli.managers.user_manager import UserManager
+from weaviate_cli.runtime import (
+    DEFAULT_CONTEXT_SETTINGS,
+    emit_captured_json_or_text,
+    emit_success,
+    get_runtime,
+    handle_command_error,
+    require_confirmation,
+)
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("role")
+@click.group("role", context_settings=DEFAULT_CONTEXT_SETTINGS)
 def role_group() -> None:
     """Manage RBAC roles and permissions in Weaviate."""
 
 
-@role_group.command("create")
+@role_group.command(
+    "create",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli role create reader -p read_collections:* -p read_data:*\n"
+        "  weaviate-cli role create articles-rw -p crud_data:Articles"
+    ),
+)
 @click.argument("role_name", shell_complete=role_name_complete)
 @click.option(
     "-p",
@@ -27,34 +46,40 @@ def role_group() -> None:
     help=PERMISSION_HELP_STRING,
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def create_role_cli(
     ctx: click.Context,
     role_name: str,
     permission: tuple[str, ...],
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Create an RBAC role with permissions."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role create"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         role_man = RoleManager(client)
-        role_man.create_role(
-            role_name=role_name, permissions=permission, json_output=json_output
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: role_man.create_role(
+                role_name=role_name, permissions=permission, json_output=as_json
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("list")
+@role_group.command("list", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.option(
     "--user",
     "user_name",
@@ -73,7 +98,10 @@ def create_role_cli(
     help="List roles assigned to the current authenticated user.",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def list_roles_cli(
@@ -81,14 +109,20 @@ def list_roles_cli(
     user_name: str | None,
     user_type: str,
     mine: bool,
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """List all roles, roles for a specific user, or current user's roles."""
-    if mine and user_name:
-        raise click.UsageError("Cannot specify both --mine and --user.")
-
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role list"
     client: WeaviateClient | None = None
     try:
+        if mine and user_name:
+            raise CLIError(
+                code="CONFLICTING_OPTIONS",
+                message="Cannot specify both --mine and --user.",
+                exit_code=ExitCode.USAGE,
+            )
+
         client = get_client_from_context(ctx)
         role_man = RoleManager(client)
         roles: list[Role] = []
@@ -105,86 +139,115 @@ def list_roles_cli(
         else:
             roles = list(role_man.get_all_roles().values())
 
-        if len(roles) == 0:
-            if json_output:
-                click.echo(json.dumps({"roles": []}, indent=2))
-            else:
+        roles_data = [RoleManager.role_to_dict(role) for role in roles]
+
+        def _render_text() -> None:
+            if not roles:
                 click.echo("No roles found.")
-        elif json_output:
-            roles_data = [RoleManager.role_to_dict(role) for role in roles]
-            click.echo(json.dumps({"roles": roles_data}, indent=2, default=str))
-        else:
+                return
             for role in roles:
                 role_man.print_role(role)
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+
+        emit_success(
+            runtime,
+            {"roles": roles_data},
+            command=command,
+            text_renderer=_render_text,
+        )
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("get")
+@role_group.command("get", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("role_name", shell_complete=role_name_complete)
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
-def get_role_cli(ctx: click.Context, role_name: str, json_output: bool) -> None:
+def get_role_cli(ctx: click.Context, role_name: str, json_output: bool | None) -> None:
     """Get details for a specific role."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role get"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         role_man = RoleManager(client)
         role = role_man.get_role(role_name=role_name)
         if role is None:
-            raise Exception(f"Role '{role_name}' not found.")
-        if json_output:
-            click.echo(
-                json.dumps(
-                    {"roles": [RoleManager.role_to_dict(role)]},
-                    indent=2,
-                    default=str,
-                )
+            raise CLIError(
+                code="ROLE_NOT_FOUND",
+                message=f"Role '{role_name}' not found.",
+                exit_code=ExitCode.NOT_FOUND,
+                hint="Run 'weaviate-cli role list' to see existing roles.",
             )
-        else:
-            role_man.print_role(role)
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+        emit_success(
+            runtime,
+            RoleManager.role_to_dict(role),
+            command=command,
+            text_renderer=lambda: role_man.print_role(role),
+        )
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("delete")
+@role_group.command("delete", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("role_name", shell_complete=role_name_complete)
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "-y",
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm deleting the RBAC role.",
+)
+@click.option(
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
-def delete_role_cli(ctx: click.Context, role_name: str, json_output: bool) -> None:
-    """Delete an RBAC role."""
+def delete_role_cli(
+    ctx: click.Context, role_name: str, yes: bool, json_output: bool | None
+) -> None:
+    """Delete an RBAC role (requires --yes)."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role delete"
+    require_confirmation(
+        runtime,
+        yes=yes,
+        command=command,
+        message=f"Deleting RBAC role '{role_name}' is destructive and requires --yes.",
+        hint=f"Re-run with 'weaviate-cli role delete {role_name} --yes' after confirming.",
+    )
+
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         role_manager = RoleManager(client)
-        role_manager.delete_role(role_name=role_name, json_output=json_output)
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: role_manager.delete_role(
+                role_name=role_name, json_output=as_json
+            ),
+        )
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("assign")
+@role_group.command("assign", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.option(
     "--role",
     "role_names",
@@ -206,7 +269,10 @@ def delete_role_cli(ctx: click.Context, role_name: str, json_output: bool) -> No
     help="Type of user (default: 'db').",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def assign_role_cli(
@@ -214,30 +280,33 @@ def assign_role_cli(
     role_names: tuple[str, ...],
     user_name: str,
     user_type: str,
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Assign one or more roles to a user."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role assign"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         user_manager = UserManager(client)
-        user_manager.add_role(
-            role_name=role_names,
-            user_name=user_name,
-            user_type=user_type,
-            json_output=json_output,
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: user_manager.add_role(
+                role_name=role_names,
+                user_name=user_name,
+                user_type=user_type,
+                json_output=as_json,
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("revoke")
+@role_group.command("revoke", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.option(
     "--role",
     "role_names",
@@ -259,7 +328,10 @@ def assign_role_cli(
     help="Type of user (default: 'db').",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def revoke_role_cli(
@@ -267,30 +339,33 @@ def revoke_role_cli(
     role_names: tuple[str, ...],
     user_name: str,
     user_type: str,
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Revoke one or more roles from a user."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role revoke"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         user_manager = UserManager(client)
-        user_manager.revoke_role(
-            role_name=role_names,
-            user_name=user_name,
-            user_type=user_type,
-            json_output=json_output,
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: user_manager.revoke_role(
+                role_name=role_names,
+                user_name=user_name,
+                user_type=user_type,
+                json_output=as_json,
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("add-permission")
+@role_group.command("add-permission", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("role_name", shell_complete=role_name_complete)
 @click.option(
     "-p",
@@ -300,34 +375,40 @@ def revoke_role_cli(
     help=PERMISSION_HELP_STRING,
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def add_permission_cli(
     ctx: click.Context,
     role_name: str,
     permission: tuple[str, ...],
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Add one or more permissions to a role."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role add-permission"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         role_manager = RoleManager(client)
-        role_manager.add_permission(
-            permission=permission, role_name=role_name, json_output=json_output
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: role_manager.add_permission(
+                permission=permission, role_name=role_name, json_output=as_json
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@role_group.command("revoke-permission")
+@role_group.command("revoke-permission", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("role_name", shell_complete=role_name_complete)
 @click.option(
     "-p",
@@ -337,28 +418,34 @@ def add_permission_cli(
     help=PERMISSION_HELP_STRING,
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def revoke_permission_cli(
     ctx: click.Context,
     role_name: str,
     permission: tuple[str, ...],
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Revoke one or more permissions from a role."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "role revoke-permission"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         role_manager = RoleManager(client)
-        role_manager.revoke_permission(
-            permission=permission, role_name=role_name, json_output=json_output
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: role_manager.revoke_permission(
+                permission=permission, role_name=role_name, json_output=as_json
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()

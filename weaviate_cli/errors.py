@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any
 
+import click
 from weaviate.exceptions import (
     AuthenticationFailedError,
     InsufficientPermissionsError,
@@ -98,15 +99,28 @@ def _connection_hint(target: str | None, config_source: str | None) -> str:
     )
 
 
-def classify_exception(
+def _classify_exception_inner(
     exc: Exception,
     *,
     target: str | None = None,
     config_source: str | None = None,
-) -> CLIError:
-    """Translate arbitrary runtime or Weaviate SDK exceptions into a CLIError."""
+) -> CLIError | None:
     if isinstance(exc, CLIError):
         return exc
+
+    if isinstance(exc, click.UsageError):
+        return CLIError(
+            code="USAGE_ERROR",
+            message=exc.format_message(),
+            exit_code=ExitCode.USAGE,
+        )
+
+    if isinstance(exc, ValueError):
+        return CLIError(
+            code="INVALID_INPUT",
+            message=str(exc) or "Invalid input.",
+            exit_code=ExitCode.USAGE,
+        )
 
     if isinstance(exc, AuthenticationFailedError):
         return CLIError(
@@ -185,6 +199,43 @@ def classify_exception(
             message=message,
             exit_code=ExitCode.RUNTIME,
             details={"status_code": status_code} if status_code is not None else None,
+        )
+
+    return None
+
+
+def classify_exception(
+    exc: Exception,
+    *,
+    target: str | None = None,
+    config_source: str | None = None,
+) -> CLIError:
+    """Translate arbitrary runtime or Weaviate SDK exceptions into a CLIError."""
+    direct = _classify_exception_inner(exc, target=target, config_source=config_source)
+    if direct is not None:
+        return direct
+
+    # Unwrap chained causes (e.g. legacy managers wrapping SDK errors with `from e`).
+    cause = exc.__cause__
+    if isinstance(cause, Exception):
+        classified_cause = _classify_exception_inner(
+            cause, target=target, config_source=config_source
+        )
+        if classified_cause is not None:
+            return CLIError(
+                code=classified_cause.code,
+                message=str(exc) or classified_cause.message,
+                exit_code=classified_cause.exit_code,
+                hint=classified_cause.hint,
+                issues=classified_cause.issues,
+                details=classified_cause.details,
+            )
+
+    if isinstance(exc, click.ClickException):
+        return CLIError(
+            code="CLI_ERROR",
+            message=exc.format_message(),
+            exit_code=ExitCode.RUNTIME,
         )
 
     return CLIError(

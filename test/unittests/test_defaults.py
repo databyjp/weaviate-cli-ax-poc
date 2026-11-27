@@ -231,7 +231,10 @@ def test_restore_backup_defaults(runner):
     ctx.obj = {"config": MagicMock()}
     ctx.obj["config"].get_client = MagicMock()
 
-    result = runner.invoke(restore_backup_cli, obj=ctx.obj)
+    guard_result = runner.invoke(restore_backup_cli, obj=ctx.obj)
+    assert guard_result.exit_code == 2
+
+    result = runner.invoke(restore_backup_cli, ["--yes"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert RestoreBackupDefaults.backend == "s3"
     assert RestoreBackupDefaults.backup_id == "test-backup"
@@ -311,9 +314,21 @@ def test_update_tenants_defaults(runner):
 def test_update_shards_defaults(runner):
     ctx = click.Context(update_shards_cli)
     ctx.obj = {"config": MagicMock()}
-    ctx.obj["config"].get_client = MagicMock()
+    mock_client = MagicMock()
+    mock_client.collections.exists.return_value = True
+    mock_col = MagicMock()
+    mock_shard = MagicMock()
+    mock_shard.name = "shard-0"
+    mock_col.config.get_shards.return_value = [mock_shard]
+    mock_client.collections.get.return_value = mock_col
+    ctx.obj["config"].get_client.return_value = mock_client
 
-    result = runner.invoke(update_shards_cli, obj=ctx.obj)
+    missing_result = runner.invoke(update_shards_cli, obj=ctx.obj)
+    assert missing_result.exit_code == 2
+
+    result = runner.invoke(
+        update_shards_cli, ["--collection", "TestCollection"], obj=ctx.obj
+    )
     assert result.exit_code == 0, result.output
     assert UpdateShardsDefaults.collection is None
     assert UpdateShardsDefaults.status == "READY"

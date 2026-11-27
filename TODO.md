@@ -37,7 +37,7 @@ Active checklist, command specifications, and dated progress log for the `weavia
   - Added global `--json`/`--no-json` (auto-enabled when `!isatty()`) with `data`/`error`/`metadata` envelope, semantic exit codes (`0`..`5`), `-h`/`--help` with connection precedence and surface boundaries, and `collection delete --all --yes`.
   - Refactored `collection create` to JSON-only (`/v1/schema` via `--from-file <path|->` or `--from-json`, `--template`, `--dry-run`, `--check-cluster`, `--if-not-exists`) with pure client-side + live cluster module validation and strict rejection of top-level `"name"`.
 - [x] Add one-shot command/syntax discovery (`guide` Markdown + `guide --schema` machine-readable Click command introspection) and `status` diagnostics (readiness, version, identity, enabled vectorizers/modules, `/v1/mcp` probe, graceful RBAC fallback).
-- [ ] Roll out shared AX runtime (`stderr` routing, global `--json` envelope, semantic exit codes, `--yes` guards, `-h`/`--help` examples) to remaining command groups (`tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`).
+- [x] Roll out shared AX runtime (`stderr` routing, global `--json` envelope, semantic exit codes, `--yes` guards, `-h`/`--help` examples) to remaining command groups (`tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`).
 
 ### Implement lifecycle, diagnostics, and surface glue
 - [ ] Implement `cloud` delegation to `wcloud`:
@@ -89,3 +89,4 @@ Active checklist, command specifications, and dated progress log for the `weavia
 ### 2026.11.27
 - Ran isolated `claude -p` black-box eval traces (cluster inspect, collection lifecycle, validation recovery), fixed trace-discovered issues (rejecting `"vectorizer": "none"`/`vectorIndex*` with `"vectorConfig"`, 1-round `"name"` + `"type"` validation hints, and silencing `AuthlibDeprecationWarning` on startup), and added pair-isolated global `--env-file <path>`.
 - Implemented `weaviate-cli status` (target, readiness, version, RBAC-tolerant user/collections/nodes summary, enabled vectorizers/modules, and `/v1/mcp` probe) and `weaviate-cli guide` (compact Markdown + `--schema` live Click introspection), and added `.env` to `.gitignore`.
+- Rolled out the shared AX runtime (`--json/--no-json`, `data`/`error`/`metadata` envelope, `stderr` routing, semantic exit codes `0..5` with chained cause classification, `-h/--help`, and `--yes` guards on `role delete`, `user delete`, `backup restore`, `replication delete --all`, `shard update --all`) across all remaining 9 command groups (`tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`) and resolved all 44 pre-existing Pyright errors repo-wide.

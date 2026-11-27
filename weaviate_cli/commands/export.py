@@ -1,4 +1,6 @@
-import sys
+"""Click commands for the 'export' resource group."""
+
+from __future__ import annotations
 
 import click
 from weaviate import WeaviateClient
@@ -9,15 +11,21 @@ from weaviate_cli.defaults import (
     GetExportCollectionDefaults,
 )
 from weaviate_cli.managers.export_manager import ExportManager
+from weaviate_cli.runtime import (
+    DEFAULT_CONTEXT_SETTINGS,
+    emit_captured_json_or_text,
+    get_runtime,
+    handle_command_error,
+)
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("export")
+@click.group("export", context_settings=DEFAULT_CONTEXT_SETTINGS)
 def export_group() -> None:
     """Manage collection exports in Weaviate."""
 
 
-@export_group.command("create")
+@export_group.command("create", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("export_id", default=CreateExportCollectionDefaults.export_id)
 @click.option(
     "--backend",
@@ -48,7 +56,10 @@ def export_group() -> None:
     help="Wait for the export to complete before returning.",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def create_export_cli(
@@ -59,33 +70,36 @@ def create_export_cli(
     include: str | None,
     exclude: str | None,
     wait: bool,
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Create a collection export in Weaviate."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "export create"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         export_manager = ExportManager(client)
-        export_manager.create_export(
-            export_id=export_id,
-            backend=backend,
-            file_format=file_format,
-            include=include,
-            exclude=exclude,
-            wait=wait,
-            json_output=json_output,
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: export_manager.create_export(
+                export_id=export_id,
+                backend=backend,
+                file_format=file_format,
+                include=include,
+                exclude=exclude,
+                wait=wait,
+                json_output=as_json,
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@export_group.command("get")
+@export_group.command("get", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("export_id", default=GetExportCollectionDefaults.export_id)
 @click.option(
     "--backend",
@@ -94,36 +108,42 @@ def create_export_cli(
     help=f"Export storage backend (default: '{GetExportCollectionDefaults.backend}').",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def get_export_cli(
     ctx: click.Context,
     export_id: str,
     backend: str,
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Get the status of a collection export."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "export get"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         export_manager = ExportManager(client)
-        export_manager.get_export_status(
-            export_id=export_id,
-            backend=backend,
-            json_output=json_output,
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: export_manager.get_export_status(
+                export_id=export_id,
+                backend=backend,
+                json_output=as_json,
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
 
 
-@export_group.command("cancel")
+@export_group.command("cancel", context_settings=DEFAULT_CONTEXT_SETTINGS)
 @click.argument("export_id", default=CancelExportCollectionDefaults.export_id)
 @click.option(
     "--backend",
@@ -132,30 +152,36 @@ def get_export_cli(
     help=f"Export storage backend (default: '{CancelExportCollectionDefaults.backend}').",
 )
 @click.option(
-    "--json", "json_output", is_flag=True, default=False, help="Output in JSON format."
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
 )
 @click.pass_context
 def cancel_export_cli(
     ctx: click.Context,
     export_id: str,
     backend: str,
-    json_output: bool,
+    json_output: bool | None,
 ) -> None:
     """Cancel an in-progress collection export."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "export cancel"
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
         export_manager = ExportManager(client)
-        export_manager.cancel_export(
-            export_id=export_id,
-            backend=backend,
-            json_output=json_output,
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: export_manager.cancel_export(
+                export_id=export_id,
+                backend=backend,
+                json_output=as_json,
+            ),
         )
-    except Exception as e:
-        click.echo(f"Error: {e}")
-        if client:
-            client.close()
-        sys.exit(1)
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
-        if client:
+        if client is not None:
             client.close()
