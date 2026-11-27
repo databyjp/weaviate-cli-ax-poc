@@ -8,38 +8,35 @@ from weaviate_cli.managers.shard_manager import ShardManager
 
 
 @pytest.fixture
-def client() -> weaviate.Client:
+def client() -> weaviate.WeaviateClient:
     config = ConfigManager()
     return config.get_client()
 
 
 @pytest.fixture
-def collection_manager(client: weaviate.Client) -> CollectionManager:
+def collection_manager(client: weaviate.WeaviateClient) -> CollectionManager:
     return CollectionManager(client)
 
 
 @pytest.fixture
-def shard_manager(client: weaviate.Client) -> ShardManager:
+def shard_manager(client: weaviate.WeaviateClient) -> ShardManager:
     return ShardManager(client)
 
 
 def test_collection_lifecycle(collection_manager: CollectionManager):
     col_name = "LifecycleTestCol"
     try:
-        # Create collection
         collection_manager.create_collection(
-            collection=col_name,
-            inverted_index="timestamp",
-            replication_factor=1,
-            training_limit=100000,
-            async_enabled=True,
-            vectorizer="contextionary",
+            {
+                "class": col_name,
+                "vectorizer": "text2vec-contextionary",
+                "invertedIndexConfig": {"indexTimestamps": True},
+                "replicationConfig": {"factor": 1, "asyncEnabled": True},
+            }
         )
 
-        # Verify collection exists
         assert collection_manager.client.collections.exists(col_name)
 
-        # Update collection
         collection_manager.update_collection(
             collection=col_name,
             description="Updated test collection",
@@ -48,40 +45,34 @@ def test_collection_lifecycle(collection_manager: CollectionManager):
             async_enabled=False,
         )
 
-        # Get collection config to verify update
         col = collection_manager.client.collections.get(col_name)
         config = col.config.get()
         assert config.description == "Updated test collection"
         assert config.replication_config.async_enabled is False
 
     finally:
-        # Delete collection
         if collection_manager.client.collections.exists(col_name):
             collection_manager.delete_collection(collection=col_name)
         assert not collection_manager.client.collections.exists(col_name)
 
 
 def test_multiple_collections(collection_manager: CollectionManager):
+    collections = ["Articles", "Books", "Music"]
     try:
-        # Create multiple collections
-        collections = ["Articles", "Books", "Music"]
-
         for col in collections:
             collection_manager.create_collection(
-                collection=col,
-                vector_index="flat",
-                replication_factor=1,
-                shards=2,
-                training_limit=100000,
-                async_enabled=True,
-                vectorizer="contextionary",
+                {
+                    "class": col,
+                    "vectorIndexType": "flat",
+                    "vectorizer": "text2vec-contextionary",
+                    "shardingConfig": {"desiredCount": 2},
+                    "replicationConfig": {"factor": 1, "asyncEnabled": True},
+                }
             )
             assert collection_manager.client.collections.exists(col)
     finally:
-        # Delete all collections
-        collection_manager.delete_collection(collection="", all=True)
+        collection_manager.delete_collection(delete_all=True)
 
-        # Verify all collections deleted
         for col in collections:
             assert not collection_manager.client.collections.exists(col)
 
@@ -92,18 +83,16 @@ def test_shard_operations(
 ):
     col_name = "ShardTestCol"
     try:
-        # Create collection with multiple shards
         collection_manager.create_collection(
-            collection=col_name,
-            inverted_index="null",
-            replication_factor=1,
-            training_limit=1000,
-            shards=3,
-            async_enabled=True,
-            vectorizer="none",
+            {
+                "class": col_name,
+                "vectorizer": "none",
+                "invertedIndexConfig": {"indexNullState": True},
+                "shardingConfig": {"desiredCount": 3},
+                "replicationConfig": {"factor": 1, "asyncEnabled": True},
+            }
         )
 
-        # Get shard info
         col = collection_manager.client.collections.get(col_name)
         col.data.insert_many([{"title": f"Item {i}"} for i in range(10)])
 
@@ -115,38 +104,35 @@ def test_shard_operations(
         ).query.fetch_objects(limit=10)
         assert len(objects.objects) == 10
     finally:
-        # Clean up
         if collection_manager.client.collections.exists(col_name):
             collection_manager.delete_collection(collection=col_name)
 
 
 def test_error_handling(collection_manager: CollectionManager):
     try:
-        # Test creating duplicate collection
         collection_manager.create_collection(
-            collection="TestCol",
-            replication_factor=1,
-            training_limit=100000,
-            async_enabled=True,
-            vectorizer="transformers",
+            {
+                "class": "TestCol",
+                "vectorizer": "text2vec-transformers",
+                "replicationConfig": {"factor": 1, "asyncEnabled": True},
+            }
         )
 
         with pytest.raises(Exception):
             collection_manager.create_collection(
-                collection="TestCol",
-                replication_factor=1,
-                training_limit=100000,
-                async_enabled=True,
-                vectorizer="transformers",
+                {
+                    "class": "TestCol",
+                    "vectorizer": "text2vec-transformers",
+                    "replicationConfig": {"factor": 1, "asyncEnabled": True},
+                }
             )
     finally:
-        # Test deleting non-existent collection
-        collection_manager.delete_collection(collection="TestCol")
+        if collection_manager.client.collections.exists("TestCol"):
+            collection_manager.delete_collection(collection="TestCol")
 
     with pytest.raises(Exception):
         collection_manager.delete_collection(collection="NonExistentCol")
 
-    # Test updating non-existent collection
     with pytest.raises(Exception):
         collection_manager.update_collection(
             collection="NonExistentCol",

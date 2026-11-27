@@ -1,1260 +1,247 @@
+"""Unit tests for CollectionManager adapter (data-only, no stdout coupling)."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
 import weaviate.classes.config as wvc
 from weaviate.exceptions import WeaviateConnectionError
 
+from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.collection_manager import CollectionManager
 
 
 @pytest.fixture
 def mock_wvc_object_ttl():
-    """Mock the ObjectTTL configuration classes."""
-    with (
-        patch.object(wvc.Configure, "ObjectTTL", create=True) as mock_configure_ttl,
-        patch.object(wvc.Reconfigure, "ObjectTTL", create=True) as mock_reconfigure_ttl,
-    ):
-        # Setup Configure.ObjectTTL methods
-        mock_configure_ttl.delete_by_creation_time = MagicMock(return_value=MagicMock())
-        mock_configure_ttl.delete_by_update_time = MagicMock(return_value=MagicMock())
-        mock_configure_ttl.delete_by_date_property = MagicMock(return_value=MagicMock())
-        mock_configure_ttl.disable = MagicMock(return_value=MagicMock())
-
-        # Setup Reconfigure.ObjectTTL methods
-        mock_reconfigure_ttl.delete_by_creation_time = MagicMock(
-            return_value=MagicMock()
-        )
-        mock_reconfigure_ttl.delete_by_update_time = MagicMock(return_value=MagicMock())
-        mock_reconfigure_ttl.delete_by_date_property = MagicMock(
-            return_value=MagicMock()
-        )
-        mock_reconfigure_ttl.disable = MagicMock(return_value=MagicMock())
-
-        yield {"configure": mock_configure_ttl, "reconfigure": mock_reconfigure_ttl}
+    """Mock ObjectTTL configuration builders."""
+    with patch.object(wvc.Reconfigure, "ObjectTTL", create=True) as mock_reconfigure:
+        mock_reconfigure.delete_by_creation_time = MagicMock(return_value=MagicMock())
+        mock_reconfigure.delete_by_update_time = MagicMock(return_value=MagicMock())
+        mock_reconfigure.delete_by_date_property = MagicMock(return_value=MagicMock())
+        mock_reconfigure.disable = MagicMock(return_value=MagicMock())
+        yield mock_reconfigure
 
 
-def test_create_collection(mock_client, mock_wvc_object_ttl):
-    # Setup the mock chain
+def test_create_collection_from_spec(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-
-    # Mock exists to return False first (collection doesn't exist)
-    # then True after creation (collection exists)
-    mock_collections.exists.side_effect = [False, True]
+    mock_collections.exists.return_value = False
 
     manager = CollectionManager(mock_client)
+    spec = {"class": "Articles", "vectorizer": "none"}
+    result = manager.create_collection(spec)
 
-    # Test successful collection creation
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-    )
-
-    # Verify the collection creation was called with correct parameters
-    assert (
-        mock_collections.exists.call_count == 2
-    )  # Called twice: before and after creation
-    mock_collections.create.assert_called_once()
-
-    # Verify the create call parameters
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["replication_config"].factor == 3
-    assert create_call_kwargs["replication_config"].asyncEnabled is True
-    assert create_call_kwargs["sharding_config"] is None  # since shards = 1
-    assert create_call_kwargs["properties"] is None
+    mock_collections.create_from_dict.assert_called_once_with(spec)
+    assert result == {
+        "collection": "Articles",
+        "created": True,
+        "already_exists": False,
+    }
 
 
-def test_create_collection_requires_collection_name(mock_client):
-    manager = CollectionManager(mock_client)
-    with pytest.raises(Exception, match="Collection name is required"):
-        manager.create_collection()
-
-
-def test_delete_collection_requires_collection_or_all(mock_client):
-    manager = CollectionManager(mock_client)
-    with pytest.raises(
-        Exception, match="Collection name is required unless --all is specified"
-    ):
-        manager.delete_collection()
-
-
-def test_create_collection_from_dict(mock_client):
+def test_create_collection_existing_raises_conflict(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-    manager.create_collection_from_dict(
-        config={"name": "Docs", "vectorizer": "none"},
-    )
-
-    mock_collections.create_from_dict.assert_called_once_with(
-        {"class": "Docs", "vectorizer": "none"}
-    )
-
-
-def test_create_collection_from_dict_missing_name(mock_client):
-    manager = CollectionManager(mock_client)
-    with pytest.raises(ValueError, match="non-empty 'class' name"):
-        manager.create_collection_from_dict(config={"vectorizer": "none"})
-
-
-def test_create_existing_collection(mock_client, mock_wvc_object_ttl):
-    # Setup
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    manager = CollectionManager(mock_client)
     mock_collections.exists.return_value = True
 
-    # Test that it raises the expected exception
-    with pytest.raises(Exception) as exc_info:
-        manager.create_collection(
-            collection="TestCollection",
-        )
+    manager = CollectionManager(mock_client)
+    with pytest.raises(CLIError) as exc_info:
+        manager.create_collection({"class": "Articles", "vectorizer": "none"})
 
-    # Verify the error message
-    assert (
-        str(exc_info.value)
-        == "Error: Collection 'TestCollection' already exists in Weaviate. Delete using <delete collection> command."
+    assert exc_info.value.code == "COLLECTION_EXISTS"
+    assert exc_info.value.exit_code == ExitCode.NOT_FOUND
+    mock_collections.create_from_dict.assert_not_called()
+
+
+def test_create_collection_existing_with_if_not_exists(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+
+    manager = CollectionManager(mock_client)
+    result = manager.create_collection(
+        {"class": "Articles", "vectorizer": "none"}, if_not_exists=True
     )
 
-    # Verify exists was called but create was not
-    mock_collections.exists.assert_called_once_with("TestCollection")
-    mock_collections.create.assert_not_called()
+    assert result == {
+        "collection": "Articles",
+        "created": False,
+        "already_exists": True,
+    }
+    mock_collections.create_from_dict.assert_not_called()
 
 
-def test_create_collection_failure(mock_client, mock_wvc_object_ttl):
-    # Setup
+def test_create_collection_missing_class_raises(mock_client):
+    manager = CollectionManager(mock_client)
+    with pytest.raises(CLIError) as exc_info:
+        manager.create_collection({"vectorizer": "none"})
+    assert exc_info.value.code == "INVALID_COLLECTION_SPEC"
+    assert exc_info.value.exit_code == ExitCode.USAGE
+
+
+def test_create_collection_propagates_sdk_errors(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-    mock_client.collections.exists.return_value = False
-    mock_client.collections.create.side_effect = WeaviateConnectionError
+    mock_collections.exists.return_value = False
+    mock_collections.create_from_dict.side_effect = WeaviateConnectionError("down")
+
     manager = CollectionManager(mock_client)
-
-    # Test that it raises the expected exception
-    with pytest.raises(Exception) as exc_info:
-        manager.create_collection(
-            collection="TestCollection",
-        )
-
-    # Verify the error message
-    assert (
-        "Error creating Collection 'TestCollection': Connection to Weaviate failed"
-        in str(exc_info.value)
-    )
-    # Verify exists was called but create was not
-    mock_collections.exists.assert_called_once_with("TestCollection")
-    mock_collections.create.assert_called_once()
+    with pytest.raises(WeaviateConnectionError):
+        manager.create_collection({"class": "Articles"})
 
 
-def test_delete_single_collection(mock_client):
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
+def test_get_available_modules(mock_client):
+    mock_client.get_meta.return_value = {
+        "version": "1.37.1",
+        "modules": {"text2vec-weaviate": {}, "generative-openai": {}},
+    }
     manager = CollectionManager(mock_client)
-    mock_client.collections.exists.side_effect = [True, False]
-
-    # Test successful collection deletion
-    manager.delete_collection(collection="TestCollection", all=False)
-
-    mock_client.collections.delete.assert_called_once_with("TestCollection")
-
-
-def test_delete_all_collections(mock_client):
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    manager = CollectionManager(mock_client)
-    mock_client.collections.list_all.return_value = [
-        "Collection1",
-        "Collection2",
-        "Collection3",
+    assert manager.get_available_modules() == [
+        "generative-openai",
+        "text2vec-weaviate",
     ]
 
-    # Test deletion of all collections
-    manager.delete_collection(collection="", all=True)
 
-    assert mock_client.collections.delete.call_count == 3
+def test_get_collection_returns_dict_and_raises_not_found(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+    mock_col = MagicMock()
+    mock_col.config.get.return_value.to_dict.return_value = {
+        "class": "Articles",
+        "vectorizer": "none",
+    }
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+    assert manager.get_collection("Articles") == {
+        "class": "Articles",
+        "vectorizer": "none",
+    }
+
+    mock_collections.exists.return_value = False
+    with pytest.raises(CLIError) as exc_info:
+        manager.get_collection("Missing")
+    assert exc_info.value.code == "COLLECTION_NOT_FOUND"
+    assert exc_info.value.exit_code == ExitCode.NOT_FOUND
 
 
-def test_delete_nonexistent_collection(mock_client):
+def test_list_collections(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.list_all.return_value = {"Articles": MagicMock()}
+
+    mock_col = MagicMock()
+    mock_col.__len__.return_value = 42
+    mock_schema = MagicMock()
+    mock_schema.vector_config = None
+    mock_schema.vectorizer = MagicMock(value="text2vec-weaviate")
+    mock_schema.vector_index_type = MagicMock(value="hnsw")
+    mock_schema.multi_tenancy_config.enabled = False
+    mock_schema.replication_config.factor = 1
+    mock_col.config.get.return_value = mock_schema
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+    rows = manager.list_collections()
+    assert rows == [
+        {
+            "name": "Articles",
+            "multitenancy": False,
+            "tenant_count": 0,
+            "object_count": 42,
+            "replication_factor": 1,
+            "vector_index": "hnsw",
+            "named_vectors": False,
+            "vectorizer": "text2vec-weaviate",
+        }
+    ]
+
+
+def test_delete_single_and_all_collections(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
     manager = CollectionManager(mock_client)
-    mock_client.collections.exists.return_value = False
 
-    with pytest.raises(Exception):
-        manager.delete_collection(collection="TestCollection", all=False)
+    mock_collections.exists.return_value = True
+    res = manager.delete_collection("Articles")
+    assert res == {"deleted": ["Articles"], "count": 1}
+    mock_collections.delete.assert_called_once_with("Articles")
+
+    mock_collections.reset_mock()
+    mock_collections.list_all.return_value = ["A", "B"]
+    res_all = manager.delete_collection(delete_all=True)
+    assert res_all == {"deleted": ["A", "B"], "count": 2}
+    assert mock_collections.delete.call_count == 2
 
 
-def test_update_collection(mock_client, mock_wvc_object_ttl):
+def test_delete_collection_missing_raises_not_found(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
+    mock_collections.exists.return_value = False
+    manager = CollectionManager(mock_client)
+
+    with pytest.raises(CLIError) as exc_info:
+        manager.delete_collection("Missing")
+    assert exc_info.value.code == "COLLECTION_NOT_FOUND"
+    assert exc_info.value.exit_code == ExitCode.NOT_FOUND
+
+
+def test_update_collection_with_ttl_and_warnings(mock_client, mock_wvc_object_ttl):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+    mock_client.get_meta.return_value = {"version": "1.37.3"}
 
     mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
+    mock_collections.get.return_value = mock_collection
     mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
+        replication_config=MagicMock(factor=1),
         multi_tenancy_config=MagicMock(
             enabled=True, auto_tenant_creation=False, auto_tenant_activation=False
         ),
     )
 
     manager = CollectionManager(mock_client)
-    # Test collection update
-    manager.update_collection(
-        collection="TestCollection",
-        description="Updated description",
-        vector_index="hnsw",
-        async_enabled=True,
-        replication_factor=5,
-        auto_tenant_creation=True,
-        auto_tenant_activation=True,
-        replication_deletion_strategy="delete_on_conflict",
-    )
-
-    mock_collection.config.update.assert_called_once()
-    assert (
-        mock_collection.config.update.call_args.kwargs["description"]
-        == "Updated description"
-    )
-    assert (
-        mock_collection.config.update.call_args.kwargs["replication_config"].factor == 5
-    )
-    assert (
-        mock_collection.config.update.call_args.kwargs[
-            "multi_tenancy_config"
-        ].autoTenantCreation
-        is True
-    )
-    assert (
-        mock_collection.config.update.call_args.kwargs[
-            "multi_tenancy_config"
-        ].autoTenantActivation
-        is True
-    )
-
-
-def test_update_nonexistent_collection(mock_client):
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    manager = CollectionManager(mock_client)
-    mock_client.collections.exists.return_value = False
-
-    with pytest.raises(Exception) as exc_info:
-        manager.update_collection(
-            collection="TestCollection",
-            description="Updated description",
-            vector_index="hnsw",
-            training_limit=10000,
-            async_enabled=True,
-            auto_tenant_creation=True,
-            auto_tenant_activation=True,
-            replication_deletion_strategy="delete_on_conflict",
-        )
-
-    assert "Error: Collection 'TestCollection' does not exist in Weaviate." in str(
-        exc_info.value
-    )
-
-    mock_collections.exists.assert_called_once_with("TestCollection")
-    mock_collections.update.assert_not_called()
-
-
-def test_create_collection_with_ttl_create_type(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection with object TTL using 'create' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="create",
-        object_ttl_time=3600,
-        object_ttl_filter_expired=True,
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["object_ttl_config"] is not None
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["configure"].delete_by_creation_time.assert_called_once_with(
-        time_to_live=3600,
-        filter_expired_objects=True,
-    )
-
-
-def test_create_collection_with_ttl_update_type(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection with object TTL using 'update' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="update",
-        object_ttl_time=7200,
-        object_ttl_filter_expired=False,
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["object_ttl_config"] is not None
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["configure"].delete_by_update_time.assert_called_once_with(
-        time_to_live=7200,
-        filter_expired_objects=False,
-    )
-
-
-def test_create_collection_with_ttl_property_type(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection with object TTL using 'property' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="property",
-        object_ttl_time=86400,
-        object_ttl_filter_expired=True,
-        object_ttl_property_name="expiresAt",
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["object_ttl_config"] is not None
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["configure"].delete_by_date_property.assert_called_once_with(
-        property_name="expiresAt",
-        ttl_offset=86400,
-        filter_expired_objects=True,
-    )
-
-
-def test_create_collection_with_ttl_property_type_custom_property_name(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test creating a collection with object TTL 'property' type and custom property name."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="property",
-        object_ttl_time=86400,
-        object_ttl_filter_expired=True,
-        object_ttl_property_name="expiresAt",
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["object_ttl_config"] is not None
-    mock_wvc_object_ttl["configure"].delete_by_date_property.assert_called_once_with(
-        property_name="expiresAt",
-        ttl_offset=86400,
-        filter_expired_objects=True,
-    )
-
-
-def test_create_collection_object_ttl_property_name_guardrail(mock_client):
-    """Test that object_ttl_property_name is rejected when object_ttl_type is not 'property'."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.return_value = False
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(Exception) as exc_info:
-        manager.create_collection(
-            collection="TestCollection",
-            replication_factor=3,
-            vector_index="hnsw",
-            object_ttl_type="create",
-            object_ttl_time=3600,
-            object_ttl_property_name="expiresAt",
-        )
-
-    assert (
-        "object_ttl_property_name is only valid when object_ttl_type is 'property'"
-        in str(exc_info.value)
-    )
-    mock_collections.create.assert_not_called()
-
-
-def test_create_collection_with_ttl_property_type_requires_property_name(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test that object_ttl_type=property requires an explicit object_ttl_property_name."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.return_value = False
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(
-        Exception,
-        match="object_ttl_property_name is required when object_ttl_type is 'property'",
-    ):
-        manager.create_collection(
-            collection="TestCollection",
-            replication_factor=3,
-            vector_index="hnsw",
-            object_ttl_type="property",
-            object_ttl_time=86400,
-            object_ttl_property_name=None,
-        )
-
-    mock_collections.create.assert_not_called()
-
-
-def test_create_collection_with_ttl_time_zero(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection with TTL time=0 applies TTL config (not treated as unset)."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="property",
-        object_ttl_time=0,
-        object_ttl_filter_expired=False,
-        object_ttl_property_name="expiresAt",
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["object_ttl_config"] is not None
-    mock_wvc_object_ttl["configure"].delete_by_date_property.assert_called_once_with(
-        property_name="expiresAt",
-        ttl_offset=0,
-        filter_expired_objects=False,
-    )
-
-
-def test_create_collection_without_ttl_time(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection without TTL time results in no TTL config."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        object_ttl_type="create",
-        object_ttl_time=None,
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["object_ttl_config"] is None
-
-
-def test_update_collection_with_ttl_create_type(mock_client, mock_wvc_object_ttl):
-    """Test updating a collection with object TTL using 'create' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="create",
-        object_ttl_time=3600,
-        object_ttl_filter_expired=True,
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["reconfigure"].delete_by_creation_time.assert_called_once_with(
-        time_to_live=3600,
-        filter_expired_objects=True,
-    )
-
-
-def test_update_collection_with_ttl_update_type(mock_client, mock_wvc_object_ttl):
-    """Test updating a collection with object TTL using 'update' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="update",
-        object_ttl_time=7200,
-        object_ttl_filter_expired=False,
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["reconfigure"].delete_by_update_time.assert_called_once_with(
-        time_to_live=7200,
-        filter_expired_objects=False,
-    )
-
-
-def test_update_collection_with_ttl_property_type(mock_client, mock_wvc_object_ttl):
-    """Test updating a collection with object TTL using 'property' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="property",
-        object_ttl_time=86400,
-        object_ttl_filter_expired=True,
-        object_ttl_property_name="expiresAt",
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["reconfigure"].delete_by_date_property.assert_called_once_with(
-        property_name="expiresAt",
-        ttl_offset=86400,
-        filter_expired_objects=True,
-    )
-
-
-def test_update_collection_with_ttl_property_type_custom_property_name(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test updating a collection with object TTL 'property' type and custom property name."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="property",
-        object_ttl_time=86400,
-        object_ttl_filter_expired=True,
-        object_ttl_property_name="expiresAt",
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    mock_wvc_object_ttl["reconfigure"].delete_by_date_property.assert_called_once_with(
-        property_name="expiresAt",
-        ttl_offset=86400,
-        filter_expired_objects=True,
-    )
-
-
-def test_update_collection_object_ttl_property_name_guardrail(mock_client):
-    """Test that object_ttl_property_name is rejected when object_ttl_type is not 'property'."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.return_value = True
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(Exception) as exc_info:
-        manager.update_collection(
-            collection="TestCollection",
-            object_ttl_type="create",
-            object_ttl_time=3600,
-            object_ttl_filter_expired=True,
-            object_ttl_property_name="expiresAt",
-        )
-
-    assert (
-        "object_ttl_property_name is only valid when object_ttl_type is 'property'"
-        in str(exc_info.value)
-    )
-    mock_collection.config.update.assert_not_called()
-
-
-def test_update_collection_with_ttl_property_type_requires_property_name(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test that object_ttl_type=property requires an explicit object_ttl_property_name."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.return_value = True
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(
-        Exception,
-        match="object_ttl_property_name is required when object_ttl_type is 'property'",
-    ):
-        manager.update_collection(
-            collection="TestCollection",
-            object_ttl_type="property",
-            object_ttl_time=86400,
-            object_ttl_property_name=None,
-        )
-
-    mock_collection.config.update.assert_not_called()
-
-
-def test_update_collection_with_ttl_time_zero(mock_client, mock_wvc_object_ttl):
-    """Test updating a collection with TTL time=0 applies TTL config (not treated as unset)."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="property",
-        object_ttl_time=0,
-        object_ttl_filter_expired=False,
-        object_ttl_property_name="expiresAt",
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    mock_wvc_object_ttl["reconfigure"].delete_by_date_property.assert_called_once_with(
-        property_name="expiresAt",
-        ttl_offset=0,
-        filter_expired_objects=False,
-    )
-
-
-def test_update_collection_without_ttl_time(mock_client, mock_wvc_object_ttl):
-    """Test updating a collection without TTL time results in no TTL config."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        description="Updated description",
-        object_ttl_type="create",
-        object_ttl_time=None,
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is None
-
-
-def test_update_collection_with_ttl_and_multitenancy(mock_client, mock_wvc_object_ttl):
-    """Test updating a multitenant collection with object TTL."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=True, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="create",
-        object_ttl_time=3600,
-        object_ttl_filter_expired=True,
-        auto_tenant_creation=True,
-        auto_tenant_activation=True,
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    assert update_call_kwargs["multi_tenancy_config"].autoTenantCreation is True
-    assert update_call_kwargs["multi_tenancy_config"].autoTenantActivation is True
-    # Verify the correct TTL method was called
-    mock_wvc_object_ttl["reconfigure"].delete_by_creation_time.assert_called_once_with(
-        time_to_live=3600,
-        filter_expired_objects=True,
-    )
-
-
-def test_update_collection_with_ttl_disable_type(mock_client, mock_wvc_object_ttl):
-    """Test updating a collection with object TTL using 'disable' type."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        object_ttl_type="disable",
-        object_ttl_time=None,
-    )
-
-    mock_collection.config.update.assert_called_once()
-    update_call_kwargs = mock_collection.config.update.call_args.kwargs
-    assert update_call_kwargs["object_ttl_config"] is not None
-    # Verify the disable method was called
-    mock_wvc_object_ttl["reconfigure"].disable.assert_called_once()
-
-
-def test_create_collection_with_async_replication_config(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test creating a collection with async replication config parameters."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-    mock_client.get_meta.return_value = {"version": "1.36.0"}
-
-    manager = CollectionManager(mock_client)
-
-    async_config = {"max_workers": 10, "frequency": 60, "propagation_concurrency": 4}
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-        async_replication_config=async_config,
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["replication_config"].asyncEnabled is True
-    # Verify async_config is set on the replication config
-    repl_config = create_call_kwargs["replication_config"]
-    assert repl_config.asyncConfig is not None
-    assert repl_config.asyncConfig.maxWorkers == 10
-    assert repl_config.asyncConfig.frequency == 60
-    assert repl_config.asyncConfig.propagationConcurrency == 4
-
-
-def test_create_collection_without_async_replication_config(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test creating a collection without async replication config passes None."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-    )
-
-    mock_collections.create.assert_called_once()
-    repl_config = mock_collections.create.call_args.kwargs["replication_config"]
-    assert repl_config.asyncConfig is None
-
-
-def test_create_collection_async_replication_config_requires_async_enabled(
-    mock_client,
-):
-    """Test that async_replication_config is rejected when async_enabled is False."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.return_value = False
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(Exception, match="requires --async_enabled"):
-        manager.create_collection(
-            collection="TestCollection",
-            replication_factor=3,
-            vector_index="hnsw",
-            async_enabled=False,
-            async_replication_config={"max_workers": 10},
-        )
-
-    mock_collections.create.assert_not_called()
-
-
-def test_update_collection_with_async_replication_config(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test updating a collection with async replication config parameters."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-    mock_client.get_meta.return_value = {"version": "1.36.0"}
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    async_config = {"max_workers": 20, "propagation_batch_size": 100}
-
-    manager.update_collection(
-        collection="TestCollection",
-        async_replication_config=async_config,
-    )
-
-    mock_collection.config.update.assert_called_once()
-    repl_config = mock_collection.config.update.call_args.kwargs["replication_config"]
-    assert repl_config.asyncConfig is not None
-    assert repl_config.asyncConfig.maxWorkers == 20
-    assert repl_config.asyncConfig.propagationBatchSize == 100
-
-
-def test_update_collection_without_async_replication_config(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test updating a collection without async replication config passes None."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
+    res = manager.update_collection(
+        collection="Articles",
         description="Updated",
+        replication_factor=3,
+        async_enabled=True,
+        auto_tenant_creation=True,
+        object_ttl_type="property",
+        object_ttl_time=3600,
+        object_ttl_filter_expired=True,
+        object_ttl_property_name="expiresAt",
+        async_replication_config={"max_workers": 10},
     )
 
+    assert res["collection"] == "Articles"
+    assert res["updated"] is True
+    assert any("max_workers removed" in w for w in res["warnings"])
     mock_collection.config.update.assert_called_once()
-    repl_config = mock_collection.config.update.call_args.kwargs["replication_config"]
-    assert repl_config.asyncConfig is None
-
-
-def test_create_collection_with_hfresh_defaults(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection with hfresh vector index using default parameters."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        vector_index="hfresh",
+    mock_wvc_object_ttl.delete_by_date_property.assert_called_once_with(
+        property_name="expiresAt",
+        ttl_offset=3600,
+        filter_expired_objects=True,
     )
 
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["vector_index_config"] is not None
 
-
-def test_create_collection_with_hfresh_all_params(mock_client, mock_wvc_object_ttl):
-    """Test creating a collection with hfresh vector index with all parameters set."""
+def test_update_collection_guardrails(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-
     manager = CollectionManager(mock_client)
 
-    manager.create_collection(
-        collection="TestCollection",
-        vector_index="hfresh",
-        hfresh_max_posting_size_kb=64,
-        hfresh_replicas=2,
-        hfresh_search_probe=100,
-        distance_metric="cosine",
-        rescore_limit=200,
-    )
-
-    mock_collections.create.assert_called_once()
-    create_call_kwargs = mock_collections.create.call_args.kwargs
-    assert create_call_kwargs["name"] == "TestCollection"
-    assert create_call_kwargs["vector_index_config"] is not None
-
-
-def test_create_collection_with_hfresh_valid_distance_metrics(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test creating an hfresh collection with each valid distance metric."""
-    valid_metrics = ["cosine", "dot", "l2-squared", "hamming", "manhattan"]
-    for metric in valid_metrics:
-        mock_collections = MagicMock()
-        mock_client.collections = mock_collections
-        mock_collections.exists.side_effect = [False, True]
-
-        manager = CollectionManager(mock_client)
-        manager.create_collection(
-            collection="TestCollection",
-            vector_index="hfresh",
-            distance_metric=metric,
+    with pytest.raises(CLIError) as exc_info:
+        manager.update_collection(
+            collection="Articles",
+            object_ttl_type="create",
+            object_ttl_property_name="expiresAt",
         )
-        mock_collections.create.assert_called_once()
+    assert exc_info.value.code == "INVALID_TTL_CONFIG"
+    assert exc_info.value.exit_code == ExitCode.USAGE
 
-
-def test_create_collection_with_hfresh_invalid_distance_metric(
-    mock_client, mock_wvc_object_ttl
-):
-    """Test that an unsupported distance metric raises ValueError."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
     mock_collections.exists.return_value = False
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(ValueError) as exc_info:
-        manager.create_collection(
-            collection="TestCollection",
-            vector_index="hfresh",
-            distance_metric="invalid_metric",
-        )
-
-    assert "Invalid distance_metric: 'invalid_metric'" in str(exc_info.value)
-    mock_collections.create.assert_not_called()
-
-
-def test_update_collection_async_replication_config_rejected_when_async_false(
-    mock_client,
-):
-    """Test that async_replication_config is rejected when async_enabled is explicitly False."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.return_value = True
-
-    manager = CollectionManager(mock_client)
-
-    with pytest.raises(Exception, match="cannot be used when --async_enabled is False"):
-        manager.update_collection(
-            collection="TestCollection",
-            async_enabled=False,
-            async_replication_config={"max_workers": 10},
-        )
-
-    mock_collections.get.return_value.config.update.assert_not_called()
-
-
-def test_create_collection_async_replication_config_warns_on_old_version(
-    mock_client, mock_wvc_object_ttl, capsys
-):
-    """Warn when async_replication_config is used against a server older than v1.36.0."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-    mock_client.get_meta.return_value = {"version": "1.34.0"}
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-        async_replication_config={"max_workers": 10},
-    )
-
-    captured = capsys.readouterr()
-    assert "Warning: --async_replication_config requires Weaviate >= v1.36.0" in (
-        captured.out + captured.err
-    )
-    mock_collections.create.assert_called_once()
-
-
-def test_update_collection_async_replication_config_reset(
-    mock_client, mock_wvc_object_ttl
-):
-    """Reset (empty dict) calls Reconfigure.Replication.async_config() with no kwargs."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-    mock_client.get_meta.return_value = {"version": "1.36.0"}
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    with patch.object(
-        wvc.Reconfigure.Replication,
-        "async_config",
-        wraps=wvc.Reconfigure.Replication.async_config,
-    ) as mock_async_config:
-        manager.update_collection(
-            collection="TestCollection",
-            async_replication_config={},
-        )
-
-    mock_async_config.assert_called_once_with()
-    mock_collection.config.update.assert_called_once()
-    repl_config = mock_collection.config.update.call_args.kwargs["replication_config"]
-    assert repl_config.asyncConfig is not None
-
-
-def test_update_collection_async_replication_config_warns_on_old_version(
-    mock_client, mock_wvc_object_ttl, capsys
-):
-    """Warn when async_replication_config is used against a server older than v1.36.0."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-    mock_client.get_meta.return_value = {"version": "1.34.0"}
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        async_replication_config={"max_workers": 10},
-    )
-
-    captured = capsys.readouterr()
-    assert "Warning: --async_replication_config requires Weaviate >= v1.36.0" in (
-        captured.out + captured.err
-    )
-    mock_collection.config.update.assert_called_once()
-
-
-def test_create_collection_warns_on_removed_async_replication_keys(
-    mock_client, mock_wvc_object_ttl, capsys
-):
-    """Warn when a removed async replication key is used against a server >= v1.37.3."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-    mock_client.get_meta.return_value = {"version": "1.38.0"}
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-        async_replication_config={"max_workers": 10, "frequency": 60},
-    )
-
-    captured = capsys.readouterr()
-    assert "max_workers removed from the Weaviate server schema in v1.37.3" in (
-        captured.out + captured.err
-    )
-    mock_collections.create.assert_called_once()
-
-
-def test_create_collection_no_removed_key_warning_on_older_server(
-    mock_client, mock_wvc_object_ttl, capsys
-):
-    """A server older than v1.37.3 still supports the key, so no warning is emitted."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-    mock_client.get_meta.return_value = {"version": "1.36.0"}
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-        async_replication_config={"max_workers": 10},
-    )
-
-    captured = capsys.readouterr()
-    assert "removed from the Weaviate server schema" not in (
-        captured.out + captured.err
-    )
-    mock_collections.create.assert_called_once()
-
-
-def test_create_collection_no_removed_key_warning_for_supported_keys(
-    mock_client, mock_wvc_object_ttl, capsys
-):
-    """Keys that are still supported never trigger the removal warning."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_collections.exists.side_effect = [False, True]
-    mock_client.get_meta.return_value = {"version": "1.38.0"}
-
-    manager = CollectionManager(mock_client)
-
-    manager.create_collection(
-        collection="TestCollection",
-        replication_factor=3,
-        vector_index="hnsw",
-        async_enabled=True,
-        async_replication_config={"frequency": 60},
-    )
-
-    captured = capsys.readouterr()
-    assert "removed from the Weaviate server schema" not in (
-        captured.out + captured.err
-    )
-    mock_collections.create.assert_called_once()
-
-
-def test_update_collection_warns_on_removed_async_replication_keys(
-    mock_client, mock_wvc_object_ttl, capsys
-):
-    """Warn when a removed async replication key is used against a server >= v1.37.3."""
-    mock_collections = MagicMock()
-    mock_client.collections = mock_collections
-    mock_client.collections.exists.side_effect = [True, True]
-    mock_client.get_meta.return_value = {"version": "1.38.0"}
-
-    mock_collection = MagicMock()
-    mock_client.collections.get.return_value = mock_collection
-    mock_collection.config.get.return_value = MagicMock(
-        replication_config=MagicMock(factor=3),
-        multi_tenancy_config=MagicMock(
-            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
-        ),
-    )
-
-    manager = CollectionManager(mock_client)
-
-    manager.update_collection(
-        collection="TestCollection",
-        async_replication_config={"alive_nodes_checking_frequency": 30},
-    )
-
-    captured = capsys.readouterr()
-    assert (
-        "alive_nodes_checking_frequency removed from the Weaviate server schema "
-        "in v1.37.3"
-    ) in (captured.out + captured.err)
-    mock_collection.config.update.assert_called_once()
+    with pytest.raises(CLIError) as missing_exc:
+        manager.update_collection(collection="Missing", description="hi")
+    assert missing_exc.value.code == "COLLECTION_NOT_FOUND"
+    assert missing_exc.value.exit_code == ExitCode.NOT_FOUND

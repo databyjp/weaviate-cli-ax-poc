@@ -10,51 +10,7 @@ from collections.abc import Callable, Sequence
 import click
 import semver
 import weaviate
-import weaviate.classes.config as wvc
 from weaviate.rbac.models import Permissions, PermissionsCreateType, RoleScope
-
-PROPERTY_DATA_TYPE_MAP: dict[str, wvc.DataType] = {
-    "text": wvc.DataType.TEXT,
-    "text[]": wvc.DataType.TEXT_ARRAY,
-    "int": wvc.DataType.INT,
-    "int[]": wvc.DataType.INT_ARRAY,
-    "bool": wvc.DataType.BOOL,
-    "boolean": wvc.DataType.BOOL,
-    "bool[]": wvc.DataType.BOOL_ARRAY,
-    "boolean[]": wvc.DataType.BOOL_ARRAY,
-    "number": wvc.DataType.NUMBER,
-    "number[]": wvc.DataType.NUMBER_ARRAY,
-    "date": wvc.DataType.DATE,
-    "date[]": wvc.DataType.DATE_ARRAY,
-    "uuid": wvc.DataType.UUID,
-    "uuid[]": wvc.DataType.UUID_ARRAY,
-    "geo": wvc.DataType.GEO_COORDINATES,
-    "geocoordinates": wvc.DataType.GEO_COORDINATES,
-    "blob": wvc.DataType.BLOB,
-    "phone": wvc.DataType.PHONE_NUMBER,
-    "phonenumber": wvc.DataType.PHONE_NUMBER,
-    "object": wvc.DataType.OBJECT,
-    "object[]": wvc.DataType.OBJECT_ARRAY,
-}
-
-
-def parse_property_spec(spec: str) -> wvc.Property:
-    """Parse a 'name:type' property specification into a Weaviate Property."""
-    if ":" not in spec:
-        raise ValueError(
-            f"Invalid property format: '{spec}'. Expected 'name:type' (e.g. 'title:text')."
-        )
-    name, raw_type = spec.split(":", 1)
-    name = name.strip()
-    type_key = raw_type.strip().lower()
-    if not name:
-        raise ValueError(f"Invalid property format: '{spec}'. Property name is empty.")
-    if type_key not in PROPERTY_DATA_TYPE_MAP:
-        valid = ", ".join(sorted(PROPERTY_DATA_TYPE_MAP.keys()))
-        raise ValueError(
-            f"Unknown property data type: '{raw_type.strip()}'. Valid types: {valid}"
-        )
-    return wvc.Property(name=name, data_type=PROPERTY_DATA_TYPE_MAP[type_key])
 
 
 def get_client_from_context(ctx: click.Context) -> weaviate.WeaviateClient:
@@ -215,7 +171,8 @@ def warn_removed_async_replication_keys(
     click.echo(
         f"Warning: {', '.join(removed)} removed from the Weaviate server schema in "
         f"v{ASYNC_REPLICATION_CONFIG_REMOVED_VERSION}. "
-        "This server will ignore these settings."
+        "This server will ignore these settings.",
+        err=True,
     )
 
 

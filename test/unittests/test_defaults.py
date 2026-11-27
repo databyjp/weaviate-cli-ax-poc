@@ -25,7 +25,6 @@ from weaviate_cli.commands.tenant import (
 )
 from weaviate_cli.defaults import (
     CreateBackupDefaults,
-    CreateCollectionDefaults,
     CreateTenantsDefaults,
     DeleteCollectionDefaults,
     DeleteTenantsDefaults,
@@ -51,23 +50,20 @@ def test_create_collection_defaults(runner):
     ctx.obj["config"].get_client = MagicMock()
 
     mock_client = MagicMock()
-    mock_client.collections.exists.side_effect = [False, True]
+    mock_client.collections.exists.return_value = False
+    mock_client.get_meta.return_value = {"version": "1.37.1", "modules": {}}
     ctx.obj["config"].get_client.return_value = mock_client
 
-    # Omitting NAME (without --from-file/--from-json) must fail
+    # Omitting schema input must fail with exit code 2
     missing_result = runner.invoke(create_collection_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(create_collection_cli, ["TestCollection"], obj=ctx.obj)
+    result = runner.invoke(
+        create_collection_cli,
+        ["--from-json", '{"class": "TestCollection", "vectorizer": "none"}'],
+        obj=ctx.obj,
+    )
     assert result.exit_code == 0, result.output
-    assert CreateCollectionDefaults.collection is None
-    assert CreateCollectionDefaults.replication_factor == 1
-    assert CreateCollectionDefaults.object_ttl_property_name is None
-    assert CreateCollectionDefaults.async_enabled is False
-    assert CreateCollectionDefaults.vector_index == "hnsw"
-    assert CreateCollectionDefaults.training_limit == 10000
-    assert CreateCollectionDefaults.multitenant is False
-    assert CreateCollectionDefaults.shards == 0
 
 
 def test_create_tenants_defaults(runner):

@@ -31,11 +31,13 @@ Active checklist, command specifications, and dated progress log for the `weavia
   - *(Lifecycle `local`/`cloud` and diagnostics/glue `status`/`config`/`mcp`/`guide` are tracked in [Implement lifecycle, diagnostics, and surface glue](#implement-lifecycle-diagnostics-and-surface-glue).)*
 
 ### Harden AX contracts
-- [ ] Route all errors, warnings, and progress messages strictly to `stderr` (`err=True`); keep `stdout` strictly for command output (including removing `stdout` gRPC warnings in `ConfigManager`).
-- [ ] Add global `--json` flag (auto-enabled when `!isatty()`) emitting a consistent `data`/`error`/`metadata` envelope matching `wcloud` on both success and error.
-- [ ] Support `WEAVIATE_URL`, `WEAVIATE_API_KEY`, and `WEAVIATE_GRPC_URL` env vars (precedence: CLI flags > env vars > `--config-file` > `~/.config/weaviate/config.json` > `localhost`).
-- [ ] Implement semantic exit codes (`0` ok, `1` runtime/server, `2` usage/validation, `3` auth/RBAC, `4` not found/conflict, `5` connectivity/missing dependency).
-- [ ] Require `--yes` on destructive/bulk operations (`collection delete --all`, `replication delete --all`, `role delete`, `user delete`, `backup restore`, `local destroy`) and require explicit resource names.
+- [x] Shared AX runtime & `collection` vertical slice:
+  - Added `weaviate_cli/errors.py`, `weaviate_cli/runtime.py`, and `weaviate_cli/specs/collection.py`.
+  - Enabled global `--url`, `--api-key`, `--grpc-url` + `WEAVIATE_URL`, `WEAVIATE_API_KEY`, `WEAVIATE_GRPC_URL` env var precedence in `ConfigManager` (and moved gRPC fallback warnings to `stderr`).
+  - Added global `--json`/`--no-json` (auto-enabled when `!isatty()`) with `data`/`error`/`metadata` envelope, semantic exit codes (`0`..`5`), `-h`/`--help` with connection precedence and surface boundaries, and `collection delete --all --yes`.
+  - Refactored `collection create` to JSON-only (`/v1/schema` via `--from-file <path|->` or `--from-json`, `--template`, `--dry-run`, `--check-cluster`, `--if-not-exists`) with pure client-side + live cluster module validation and strict rejection of top-level `"name"`.
+- [ ] Roll out shared AX runtime (`stderr` routing, global `--json` envelope, semantic exit codes, `--yes` guards, `-h`/`--help` examples) to remaining command groups (`tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`).
+- [ ] Add one-shot command/syntax discovery (`guide` Markdown + machine-readable command schema introspection).
 
 ### Implement lifecycle, diagnostics, and surface glue
 - [ ] Implement `cloud` delegation to `wcloud`:
@@ -82,3 +84,4 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - Resolved all 121 Pyright errors without raising the SDK minimum. Fixes included stale collection config annotations, shell completion without `--config-file`, and collection listing for vectorizers the SDK returns as plain strings. All 286 existing unit tests passed; no new tests were added.
 - Configured GitHub Actions to run `make lint` and `make typecheck` before the test jobs on pull requests and pushes to `main`. Removed Black's dependency and configuration. Both checks passed locally; the release workflow was unchanged.
 - Migrated all existing admin and DDL commands to `noun-verb` groups (`collection`, `tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`) with `kebab-case` flags and no legacy `verb-noun` aliases. Redesigned `collection create` with `--from-file`/`--from-json` (`create_from_dict`) and `--property name:type`, and required explicit tenant names across `tenant` commands.
+- Surveyed `weaviate-client`, `wcloud`, `kubectl`, `aws` CLI, `supabase/cli`, `mongodb-atlas-cli`, `neonctl`, and `pscale` for declarative schema creation and AX contracts, then implemented the shared AX foundation (`errors.py`, `runtime.py`, `ConfigManager` env/flag precedence) and refactored the `collection` group (`collection create` simplified to JSON-only with `--template`, `--dry-run`, `--check-cluster`, `--if-not-exists`, and pure `specs/collection.py` client-side + live module validation; `collection delete --all` guarded by `--yes`).

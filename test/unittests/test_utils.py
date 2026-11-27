@@ -11,7 +11,6 @@ from weaviate_cli.utils import (
     get_random_string,
     parse_async_replication_config,
     parse_permission,
-    parse_property_spec,
     warn_removed_async_replication_keys,
 )
 
@@ -464,26 +463,3 @@ def test_warn_removed_async_replication_keys_handles_empty_config(capsys):
 
     client.get_meta.assert_not_called()
     assert capsys.readouterr().out == ""
-
-
-def test_parse_property_spec_valid():
-    prop = parse_property_spec("title:text")
-    assert prop.name == "title"
-    assert prop.dataType.value == "text"
-
-    prop_array = parse_property_spec("tags:text[]")
-    assert prop_array.name == "tags"
-    assert prop_array.dataType.value == "text[]"
-
-    prop_bool = parse_property_spec("published:bool")
-    assert prop_bool.name == "published"
-    assert prop_bool.dataType.value == "boolean"
-
-
-def test_parse_property_spec_invalid():
-    with pytest.raises(ValueError, match="Expected 'name:type'"):
-        parse_property_spec("title")
-    with pytest.raises(ValueError, match="Property name is empty"):
-        parse_property_spec(":text")
-    with pytest.raises(ValueError, match="Unknown property data type"):
-        parse_property_spec("title:invalid_type")

@@ -48,34 +48,6 @@ PERMISSION_HELP_STRING = (
 
 
 @dataclass
-class CreateCollectionDefaults:
-    collection: str | None = None
-    replication_factor: int = 1
-    async_enabled: bool = False
-    vector_index: str = "hnsw"
-    inverted_index: str | None = None
-    training_limit: int = 10000
-    multitenant: bool = False
-    auto_tenant_creation: bool = False
-    auto_tenant_activation: bool = False
-    shards: int = 0
-    vectorizer: str = "none"
-    vectorizer_base_url: str | None = None
-    replication_deletion_strategy: str | None = None
-    named_vector: bool = False
-    named_vector_name: str | None = "default"
-    hfresh_max_posting_size_kb: int | None = None
-    hfresh_replicas: int | None = None
-    hfresh_search_probe: int | None = None
-    distance_metric: str | None = None
-    rescore_limit: int | None = None
-    object_ttl_type: str = "create"
-    object_ttl_time: int | None = None
-    object_ttl_filter_expired: bool | None = None
-    object_ttl_property_name: str | None = None
-
-
-@dataclass
 class CreateTenantsDefaults:
     collection: str | None = None
     tenant_suffix: str = "Tenant"

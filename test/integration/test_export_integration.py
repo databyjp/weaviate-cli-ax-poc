@@ -32,9 +32,11 @@ def setup_collection(collection_manager):
     """Create a collection with data for export tests."""
     try:
         collection_manager.create_collection(
-            collection=EXPORT_COLLECTION,
-            replication_factor=1,
-            vectorizer="none",
+            {
+                "class": EXPORT_COLLECTION,
+                "vectorizer": "none",
+                "replicationConfig": {"factor": 1},
+            }
         )
         collection_manager.client.collections.get(EXPORT_COLLECTION).data.insert_many(
             [{"title": f"Item {i}"} for i in range(100)]
@@ -109,9 +111,11 @@ def test_create_export_with_exclude(
     second_collection = "ExportTestCollection_Excluded"
     try:
         collection_manager.create_collection(
-            collection=second_collection,
-            replication_factor=1,
-            vectorizer="none",
+            {
+                "class": second_collection,
+                "vectorizer": "none",
+                "replicationConfig": {"factor": 1},
+            }
         )
         collection_manager.client.collections.get(second_collection).data.insert_many(
             [{"title": f"Excluded {i}"} for i in range(10)]
