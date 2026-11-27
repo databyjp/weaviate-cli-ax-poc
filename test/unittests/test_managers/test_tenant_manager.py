@@ -852,3 +852,108 @@ class TestUpdateTenants:
 
         # Batch update: single call with list containing the existing tenant as-is
         mock_collection.tenants.update.assert_called_once_with([already_active])
+
+
+class TestTenantScalingAndFiltering:
+    def test_create_tenants_explicit_list_uses_get_by_names_not_full_scan(
+        self, mock_client: MagicMock, capsys
+    ) -> None:
+        manager, mock_collection = _make_manager_and_collection(mock_client)
+        existing_t = _make_tenant(TenantActivityStatus.ACTIVE)
+        new_t = _make_tenant(TenantActivityStatus.ACTIVE)
+        # First get_by_names checks existence; second verifies creation
+        mock_collection.tenants.get_by_names.side_effect = [
+            {"t-existing": existing_t},
+            {"t-new": new_t},
+        ]
+
+        manager.create_tenants(
+            collection="TestCollection",
+            tenants_list=["t-existing", "t-new", "t-new"],
+            state="active",
+            json_output=True,
+        )
+
+        mock_collection.tenants.get.assert_not_called()
+        assert mock_collection.tenants.get_by_names.call_args_list[0][0][0] == [
+            "t-existing",
+            "t-new",
+        ]
+        assert mock_collection.tenants.get_by_names.call_args_list[1][0][0] == ["t-new"]
+        data = json.loads(capsys.readouterr().out)
+        assert data["tenants_created"] == 1
+
+    def test_get_tenants_filters_state_prefix_limit_and_transitional_counts(
+        self, mock_client: MagicMock, capsys
+    ) -> None:
+        manager, mock_collection = _make_manager_and_collection(mock_client)
+        mock_collection.tenants.get.return_value = {
+            "acme-1": _make_tenant(TenantActivityStatus.ACTIVE),
+            "acme-2": _make_tenant(TenantActivityStatus.OFFLOADING),
+            "acme-3": _make_tenant(TenantActivityStatus.OFFLOADING),
+            "beta-1": _make_tenant(TenantActivityStatus.ONLOADING),
+        }
+
+        result = manager.get_tenants(
+            collection="TestCollection",
+            prefix="acme-",
+            state="offloading",
+            limit=1,
+            json_output=True,
+        )
+
+        assert list(result.keys()) == ["acme-2"]
+        data = json.loads(capsys.readouterr().out)
+        assert data["tenants"] == [{"name": "acme-2", "activity_status": "OFFLOADING"}]
+        assert data["summary"]["total"] == 2
+        assert data["summary"]["offloading"] == 2
+        assert data["summary"]["onloading"] == 0
+        assert data["summary"]["returned"] == 1
+        assert data["summary"]["truncated"] is True
+        assert data["summary"]["total_unfiltered"] == 4
+
+    def test_get_tenants_multiple_ids_reports_missing_and_not_found(
+        self, mock_client: MagicMock, capsys
+    ) -> None:
+        from weaviate_cli.errors import CLIError, ExitCode
+
+        manager, mock_collection = _make_manager_and_collection(mock_client)
+        mock_collection.tenants.get_by_names.return_value = {
+            "t1": _make_tenant(TenantActivityStatus.ACTIVE),
+            "t2": _make_tenant(TenantActivityStatus.ONLOADING),
+        }
+
+        manager.get_tenants(
+            collection="TestCollection",
+            tenant_ids=["t1", "t2", "t3"],
+            json_output=True,
+        )
+        data = json.loads(capsys.readouterr().out)
+        assert [t["name"] for t in data["tenants"]] == ["t1", "t2"]
+        assert data["summary"]["onloading"] == 1
+        assert data["missing"] == ["t3"]
+
+        mock_collection.tenants.get_by_names.return_value = {}
+        with pytest.raises(CLIError) as exc_info:
+            manager.get_tenants(
+                collection="TestCollection",
+                tenant_ids=["missing-1", "missing-2"],
+            )
+        assert exc_info.value.code == "TENANT_NOT_FOUND"
+        assert exc_info.value.exit_code == ExitCode.NOT_FOUND
+
+    def test_delete_tenants_preserves_cli_error_not_found(
+        self, mock_client: MagicMock
+    ) -> None:
+        from weaviate_cli.errors import CLIError, ExitCode
+
+        manager, mock_collection = _make_manager_and_collection(mock_client)
+        mock_collection.tenants.get_by_names.return_value = {}
+
+        with pytest.raises(CLIError) as exc_info:
+            manager.delete_tenants(
+                collection="TestCollection",
+                tenants_list=["does-not-exist"],
+            )
+        assert exc_info.value.code == "TENANT_NOT_FOUND"
+        assert exc_info.value.exit_code == ExitCode.NOT_FOUND

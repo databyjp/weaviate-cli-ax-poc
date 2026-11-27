@@ -82,10 +82,13 @@ def test_create_tenants_defaults(runner):
     mock_collection.config.get.return_value = mock_config
 
     mock_collection.tenants.get.return_value = {}
-    mock_collection.tenants.get_by_names.return_value = {
-        "tenant-a": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
-        "tenant-b": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
-    }
+    mock_collection.tenants.get_by_names.side_effect = [
+        {},
+        {
+            "tenant-a": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
+            "tenant-b": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
+        },
+    ]
     ctx.obj["config"].get_client.return_value = mock_client
 
     missing_result = runner.invoke(create_tenants_cli, obj=ctx.obj)
@@ -168,9 +171,16 @@ def test_delete_tenants_defaults(runner):
     missing_result = runner.invoke(delete_tenants_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(
+    unconfirmed = runner.invoke(
         delete_tenants_cli,
         ["--collection", "TestCollection", "tenant-a"],
+        obj=ctx.obj,
+    )
+    assert unconfirmed.exit_code == 2
+
+    result = runner.invoke(
+        delete_tenants_cli,
+        ["--collection", "TestCollection", "tenant-a", "--yes"],
         obj=ctx.obj,
     )
     assert result.exit_code == 0, result.output

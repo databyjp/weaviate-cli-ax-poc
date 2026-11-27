@@ -245,3 +245,209 @@ def test_update_collection_guardrails(mock_client):
         manager.update_collection(collection="Missing", description="hi")
     assert missing_exc.value.code == "COLLECTION_NOT_FOUND"
     assert missing_exc.value.exit_code == ExitCode.NOT_FOUND
+
+
+def test_add_property_primitive_nested_and_references(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+
+    mock_col = MagicMock()
+    mock_col.config.get.return_value = MagicMock(
+        properties=[MagicMock(name="existing")],
+        references=[],
+    )
+    mock_col.config.get.return_value.properties[0].name = "existing"
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+
+    # Primitive + nested property
+    res = manager.add_property(
+        "Articles",
+        {
+            "name": "meta",
+            "dataType": ["object"],
+            "description": "Metadata",
+            "nestedProperties": [{"name": "source", "dataType": ["text"]}],
+        },
+    )
+    assert res == {
+        "collection": "Articles",
+        "property": "meta",
+        "kind": "property",
+        "data_type": ["object"],
+        "added": True,
+        "already_exists": False,
+    }
+    mock_col.config.add_property.assert_called_once()
+    added_prop = mock_col.config.add_property.call_args[0][0]
+    assert isinstance(added_prop, wvc.Property)
+    assert added_prop.name == "meta"
+    assert added_prop.nestedProperties is not None
+
+    # Single-target cross-reference
+    res_ref = manager.add_property(
+        "Articles", {"name": "hasAuthor", "dataType": ["Author"]}
+    )
+    assert res_ref["kind"] == "reference"
+    assert isinstance(
+        mock_col.config.add_reference.call_args[0][0], wvc.ReferenceProperty
+    )
+
+    # Multi-target cross-reference
+    res_multi = manager.add_property(
+        "Articles", {"name": "related", "dataType": ["Author", "Publisher"]}
+    )
+    assert res_multi["kind"] == "reference"
+    assert isinstance(
+        mock_col.config.add_reference.call_args[0][0], wvc.ReferencePropertyMultiTarget
+    )
+
+    # Existing property: conflict by default, idempotent with --if-not-exists
+    with pytest.raises(CLIError) as exists_exc:
+        manager.add_property("Articles", {"name": "existing", "dataType": ["text"]})
+    assert exists_exc.value.code == "PROPERTY_EXISTS"
+    assert exists_exc.value.exit_code == ExitCode.NOT_FOUND
+
+    skipped = manager.add_property(
+        "Articles",
+        {"name": "existing", "dataType": ["text"]},
+        if_not_exists=True,
+    )
+    assert skipped["added"] is False
+    assert skipped["already_exists"] is True
+
+
+def test_add_vector_and_delete_vector(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+
+    mock_col = MagicMock()
+    mock_col.config.get.return_value = MagicMock(
+        vector_config={"existing_vec": MagicMock()}
+    )
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+
+    res = manager.add_vector(
+        "Articles",
+        {
+            "title_vec": {
+                "vectorizer": {"text2vec-transformers": {"properties": ["title"]}},
+                "vectorIndexType": "hfresh",
+                "vectorIndexConfig": {"distance": "cosine", "rq": {"bits": 8}},
+            }
+        },
+    )
+    assert res == {"collection": "Articles", "added": ["title_vec"], "skipped": []}
+    mock_col.config.add_vector.assert_called_once()
+    vec_cfg = mock_col.config.add_vector.call_args.kwargs["vector_config"]
+    assert vec_cfg.name == "title_vec"
+
+    # Existing vector conflict & if_not_exists skip
+    with pytest.raises(CLIError) as exc_info:
+        manager.add_vector("Articles", {"existing_vec": {"vectorizer": {"none": {}}}})
+    assert exc_info.value.code == "VECTOR_EXISTS"
+    assert exc_info.value.exit_code == ExitCode.NOT_FOUND
+
+    res_skip = manager.add_vector(
+        "Articles",
+        {"existing_vec": {"vectorizer": {"none": {}}}},
+        if_not_exists=True,
+    )
+    assert res_skip == {
+        "collection": "Articles",
+        "added": [],
+        "skipped": ["existing_vec"],
+    }
+
+    # delete_vector delegates to delete_vector_index
+    del_res = manager.delete_vector("Articles", "title_vec")
+    mock_col.config.delete_vector_index.assert_called_once_with("title_vec")
+    assert del_res["deleted"] is True
+    assert del_res["async"] is True
+
+
+def test_update_collection_from_spec_and_named_vector_flags(mock_client):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+
+    mock_col = MagicMock()
+    mock_vec = MagicMock()
+    mock_vec.vector_index_config.vector_index_type.return_value = MagicMock(
+        value="hnsw"
+    )
+    mock_col.config.get.return_value = MagicMock(
+        vector_config={"title_vec": mock_vec},
+        vectorizer=None,
+        vector_index_type=None,
+        replication_config=MagicMock(factor=1),
+        multi_tenancy_config=MagicMock(
+            enabled=False, auto_tenant_creation=False, auto_tenant_activation=False
+        ),
+    )
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+
+    # Declarative spec update covering BM25/stopwords, named vector RQ+PathSeer, generative & reranker
+    res = manager.update_collection_from_spec(
+        "Articles",
+        {
+            "description": "Evolved",
+            "propertyDescriptions": {"title": "Article title"},
+            "invertedIndexConfig": {
+                "bm25": {"b": 0.7, "k1": 1.3},
+                "stopwords": {"preset": "en", "additions": ["the"]},
+            },
+            "vectorConfig": {
+                "title_vec": {
+                    "vectorIndexConfig": {
+                        "filterStrategy": "pathseer",
+                        "rq": {"enabled": True, "bits": 8},
+                    }
+                }
+            },
+            "generativeConfig": {"generative-openai": {"model": "gpt-4o"}},
+            "rerankerConfig": {"reranker-cohere": {"model": "rerank-v3.5"}},
+        },
+    )
+    assert res["updated"] is True
+    update_kwargs = mock_col.config.update.call_args.kwargs
+    assert update_kwargs["description"] == "Evolved"
+    assert update_kwargs["property_descriptions"] == {"title": "Article title"}
+    assert update_kwargs["inverted_index_config"] is not None
+    assert update_kwargs["vector_config"].name == "title_vec"
+    assert update_kwargs["generative_config"] is not None
+    assert update_kwargs["reranker_config"] is not None
+
+    # Flag-based update auto-targets single named vector with RQ + PathSeer
+    mock_col.config.update.reset_mock()
+    manager.update_collection(
+        collection="Articles",
+        vector_index="hnsw_rq",
+        rq_bits=4,
+        filter_strategy="pathseer",
+    )
+    flag_kwargs = mock_col.config.update.call_args.kwargs
+    assert flag_kwargs["vectorizer_config"] is None
+    assert flag_kwargs["vector_config"].name == "title_vec"
+    assert flag_kwargs["vector_config"].vectorIndexConfig.quantizer.bits == 4
+    assert (
+        flag_kwargs["vector_config"].vectorIndexConfig.filterStrategy
+        == wvc.VectorFilterStrategy.PATHSEER
+    )
+
+    # Multiple named vectors without --vector-name raises MISSING_VECTOR_NAME
+    mock_col.config.get.return_value.vector_config = {
+        "title_vec": mock_vec,
+        "body_vec": mock_vec,
+    }
+    with pytest.raises(CLIError) as multi_exc:
+        manager.update_collection(collection="Articles", vector_index="hnsw_pathseer")
+    assert multi_exc.value.code == "MISSING_VECTOR_NAME"
+    assert multi_exc.value.exit_code == ExitCode.USAGE

@@ -202,7 +202,7 @@ def render_guide_markdown(
         "- Non-TTY stdout automatically emits a `data`/`error`/`metadata` JSON envelope (override with `--json` / `--no-json`).",
         "- Errors and warnings go to `stderr` in text mode; `stdout` stays clean.",
         "- Exit codes: `0` ok, `1` runtime/server, `2` usage/validation, `3` auth/RBAC, `4` not found/conflict, `5` connectivity.",
-        "- Destructive actions require `--yes` (e.g. `collection delete Articles --yes`, `role delete <name> --yes`).",
+        "- Destructive actions require `--yes` (e.g. `collection delete Articles --yes`, `collection delete-vector Articles vec --yes`, `tenant delete t1 --collection Articles --yes`, `role delete <name> --yes`).",
         "",
         "## Command map",
     ]

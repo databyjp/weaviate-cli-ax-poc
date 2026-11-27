@@ -9,8 +9,12 @@ from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.specs.collection import (
     extract_referenced_modules,
     get_collection_template,
+    is_cross_reference_data_type,
     parse_collection_json,
     validate_collection_spec,
+    validate_collection_update_spec,
+    validate_property_spec,
+    validate_vector_add_spec,
 )
 
 
@@ -285,3 +289,117 @@ def test_validate_surfaces_all_common_draft_errors_in_one_round():
     assert '["text"]' in (by_path["properties[0].type"].hint or "")
     assert '["number"]' in (by_path["properties[1].dataType"].hint or "")
     assert by_path["vectorConfig"].code == "CONFLICTING_FIELDS"
+
+
+def test_validate_property_spec_primitive_nested_and_cross_ref():
+    ok_prop, issues = validate_property_spec(
+        {
+            "name": "tags",
+            "dataType": ["text[]"],
+            "tokenization": "word",
+            "indexFilterable": True,
+        }
+    )
+    assert issues == []
+    assert not is_cross_reference_data_type(ok_prop["dataType"])
+
+    ref_prop, ref_issues = validate_property_spec(
+        {"name": "related", "dataType": ["Author", "Publisher"]}
+    )
+    assert ref_issues == []
+    assert is_cross_reference_data_type(ref_prop["dataType"])
+
+    _, mixed_issues = validate_property_spec(
+        {"name": "bad", "dataType": ["text", "Author"]}
+    )
+    assert any(i.code == "CONFLICTING_FIELDS" for i in mixed_issues)
+
+    _, alias_issues = validate_property_spec({"name": "bad", "type": "string"})
+    assert any(i.path == "property[0].type" for i in alias_issues)
+
+
+def test_validate_vector_add_spec_map_single_and_modules():
+    prepared, issues = validate_vector_add_spec(
+        {
+            "vectorizer": {"text2vec-transformers": {"properties": ["title"]}},
+            "vectorIndexType": "hnsw",
+            "vectorIndexConfig": {
+                "distance": "cosine",
+                "filterStrategy": "pathseer",
+                "rq": {"enabled": True, "bits": 8},
+            },
+        },
+        vector_name="title_vec",
+        available_modules=["text2vec-transformers"],
+    )
+    assert issues == []
+    assert "title_vec" in prepared
+
+    # Unwrap {"vectorConfig": {...}} cleanly
+    unwrapped, unwrap_issues = validate_vector_add_spec(
+        {"vectorConfig": {"v1": {"vectorizer": {"none": {}}}}}
+    )
+    assert unwrap_issues == []
+    assert list(unwrapped.keys()) == ["v1"]
+
+    # Rejects disabled module and invalid RQ bits / filterStrategy
+    _, bad_issues = validate_vector_add_spec(
+        {
+            "bad_vec": {
+                "vectorizer": {"text2vec-openai": {}},
+                "vectorIndexConfig": {
+                    "filterStrategy": "unknown",
+                    "rq": {"bits": 3},
+                },
+            }
+        },
+        available_modules=["text2vec-transformers"],
+    )
+    codes = {i.code for i in bad_issues}
+    assert "MODULE_NOT_ENABLED" in codes
+    assert "INVALID_VALUE" in codes
+
+
+def test_validate_collection_update_spec_mutable_immutable_and_typos():
+    ok_patch, issues = validate_collection_update_spec(
+        {
+            "description": "Updated",
+            "propertyDescriptions": {"title": "Doc title"},
+            "invertedIndexConfig": {
+                "bm25": {"b": 0.7, "k1": 1.3},
+                "stopwords": {"preset": "en", "additions": ["foo"]},
+                "stopwordPresets": {"custom": ["bar"]},
+            },
+            "vectorConfig": {
+                "title_vec": {
+                    "vectorIndexType": "hnsw",
+                    "vectorIndexConfig": {
+                        "filterStrategy": "pathseer",
+                        "rq": {"enabled": True, "bits": 4},
+                    },
+                }
+            },
+            "generativeConfig": {"generative-openai": {"model": "gpt-4o"}},
+            "rerankerConfig": {"reranker-cohere": {"model": "rerank-v3.5"}},
+        },
+        available_modules=["generative-openai", "reranker-cohere"],
+    )
+    assert issues == []
+    assert ok_patch["description"] == "Updated"
+
+    _, bad_issues = validate_collection_update_spec(
+        {
+            "properties": [{"name": "x", "dataType": ["text"]}],
+            "descripton": "typo",
+            "multiTenancyConfig": {"enabled": True},
+            "generativeConfig": {"generative-anthropic": {}},
+        },
+        available_modules=["generative-openai"],
+    )
+    by_path = {i.path: i for i in bad_issues}
+    assert by_path["properties"].code == "IMMUTABLE_FIELD"
+    assert "add-property" in (by_path["properties"].hint or "")
+    assert by_path["descripton"].code == "UNKNOWN_FIELD"
+    assert "description" in (by_path["descripton"].hint or "")
+    assert by_path["multiTenancyConfig.enabled"].code == "IMMUTABLE_FIELD"
+    assert by_path["generativeConfig.generative-anthropic"].code == "MODULE_NOT_ENABLED"

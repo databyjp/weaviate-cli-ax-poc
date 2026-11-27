@@ -15,12 +15,16 @@ from collections.abc import Collection
 from typing import Any
 
 import weaviate.classes.config as wvc
-from weaviate.collections.classes.config_vector_index import VectorIndexType
+from weaviate.collections.classes.config_vector_index import (
+    VectorFilterStrategy,
+    VectorIndexType,
+)
 
 from weaviate_cli.errors import CLIError, ExitCode, ValidationIssue
 
 _CLASS_NAME_RE = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
 _PROPERTY_NAME_RE = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")
+_VECTOR_NAME_RE = re.compile(r"^[A-Za-z_][0-9A-Za-z_-]*$")
 
 VALID_DATA_TYPES: frozenset[str] = frozenset(dt.value for dt in wvc.DataType)
 VALID_TOKENIZATIONS: frozenset[str] = frozenset(tok.value for tok in wvc.Tokenization)
@@ -32,6 +36,12 @@ VALID_DISTANCE_METRICS: frozenset[str] = frozenset(
 )
 VALID_DELETION_STRATEGIES: frozenset[str] = frozenset(
     ds.value for ds in wvc.ReplicationDeletionStrategy
+)
+VALID_FILTER_STRATEGIES: frozenset[str] = frozenset(
+    fs.value for fs in VectorFilterStrategy
+)
+VALID_STOPWORDS_PRESETS: frozenset[str] = frozenset(
+    sp.value for sp in wvc.StopwordsPreset
 )
 
 KNOWN_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
@@ -101,8 +111,15 @@ def get_collection_template() -> dict[str, Any]:
     return copy.deepcopy(COLLECTION_TEMPLATE)
 
 
-def parse_collection_json(raw: str, *, source: str = "input") -> dict[str, Any]:
-    """Parse raw JSON text into a collection schema dictionary."""
+def parse_json_object(
+    raw: str,
+    *,
+    source: str = "input",
+    error_code: str = "INVALID_COLLECTION_SPEC",
+    label: str = "Collection schema",
+    hint: str | None = None,
+) -> dict[str, Any]:
+    """Parse raw JSON text into a dictionary, raising structured CLIError on syntax/type errors."""
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -113,21 +130,32 @@ def parse_collection_json(raw: str, *, source: str = "input") -> dict[str, Any]:
                 f"{exc.msg}."
             ),
             exit_code=ExitCode.USAGE,
-            hint=(
-                "Fix the JSON syntax or run 'weaviate-cli collection create --template' "
-                "for a valid starter schema."
-            ),
+            hint=hint,
         ) from exc
 
     if not isinstance(parsed, dict):
         raise CLIError(
-            code="INVALID_COLLECTION_SPEC",
-            message=f"Collection schema in {source} must be a JSON object.",
+            code=error_code,
+            message=f"{label} in {source} must be a JSON object.",
             exit_code=ExitCode.USAGE,
-            hint="Run 'weaviate-cli collection create --template' for a valid starter schema.",
+            hint=hint,
         )
 
     return parsed
+
+
+def parse_collection_json(raw: str, *, source: str = "input") -> dict[str, Any]:
+    """Parse raw JSON text into a collection schema dictionary."""
+    return parse_json_object(
+        raw,
+        source=source,
+        error_code="INVALID_COLLECTION_SPEC",
+        label="Collection schema",
+        hint=(
+            "Fix the JSON syntax or run 'weaviate-cli collection create --template' "
+            "for a valid starter schema."
+        ),
+    )
 
 
 def extract_referenced_modules(spec: dict[str, Any]) -> list[tuple[str, str]]:
@@ -744,5 +772,677 @@ def validate_collection_spec(
                         ),
                     )
                 )
+
+    return prepared, issues
+
+
+KNOWN_UPDATE_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
+    {
+        "description",
+        "propertyDescriptions",
+        "invertedIndexConfig",
+        "replicationConfig",
+        "multiTenancyConfig",
+        "objectTtlConfig",
+        "vectorIndexConfig",
+        "vectorConfig",
+        "generativeConfig",
+        "rerankerConfig",
+    }
+)
+
+_IMMUTABLE_UPDATE_KEY_HINTS: dict[str, str] = {
+    "class": "Collection names cannot be changed; use 'weaviate-cli alias' for zero-downtime renames.",
+    "name": "Collection names cannot be changed; remove 'name' from the update patch.",
+    "properties": "Use 'weaviate-cli collection add-property <COLLECTION> ...' to add new properties, or 'propertyDescriptions' to update descriptions.",
+    "vectorizer": "The vectorizer of an existing collection is immutable; use 'weaviate-cli collection add-vector <COLLECTION> ...' to add a new named vector.",
+    "vectorIndexType": "The vector index type of an existing vector is immutable.",
+    "shardingConfig": "Sharding configuration is immutable after collection creation.",
+    "moduleConfig": "Use 'generativeConfig' or 'rerankerConfig' in the update patch instead of raw 'moduleConfig'.",
+}
+
+
+def is_cross_reference_data_type(data_type: list[str]) -> bool:
+    """Return True when data_type represents a Weaviate cross-reference (uppercase target class names)."""
+    return bool(data_type) and all(
+        dt not in VALID_DATA_TYPES and bool(_CLASS_NAME_RE.match(dt))
+        for dt in data_type
+    )
+
+
+def validate_property_spec(
+    spec: dict[str, Any],
+) -> tuple[dict[str, Any], list[ValidationIssue]]:
+    """Validate a single Weaviate /v1/schema property or cross-reference object."""
+    prepared = copy.deepcopy(spec)
+    issues: list[ValidationIssue] = []
+
+    if (
+        "name" not in prepared
+        and isinstance(prepared.get("data"), dict)
+        and "name" in prepared["data"]
+    ):
+        issues.append(
+            ValidationIssue(
+                path="data",
+                code="UNEXPECTED_ENVELOPE",
+                message="Input looks like a CLI JSON response envelope rather than a property definition.",
+                hint='Pass a single property object like {"name": "tags", "dataType": ["text[]"]}.',
+            )
+        )
+        return prepared, issues
+
+    _validate_properties([prepared], path_prefix="property", issues=issues)
+
+    # Disallow mixing primitive DataTypes and cross-reference collection targets.
+    data_type = prepared.get("dataType")
+    if (
+        isinstance(data_type, list)
+        and data_type
+        and all(isinstance(d, str) for d in data_type)
+    ):
+        prim_entries = [d for d in data_type if d in VALID_DATA_TYPES]
+        ref_entries = [
+            d
+            for d in data_type
+            if d not in VALID_DATA_TYPES and _CLASS_NAME_RE.match(d)
+        ]
+        if prim_entries and ref_entries:
+            issues.append(
+                ValidationIssue(
+                    path="property.dataType",
+                    code="CONFLICTING_FIELDS",
+                    message="Cannot mix primitive dataTypes and cross-reference collection targets in 'dataType'.",
+                    hint='Use either a single primitive dataType (e.g. ["text"]) or one or more target collection names (e.g. ["Author"]).',
+                )
+            )
+        elif len(prim_entries) > 1:
+            issues.append(
+                ValidationIssue(
+                    path="property.dataType",
+                    code="INVALID_VALUE",
+                    message="A primitive property can only have one entry in 'dataType'.",
+                    hint='Use a single primitive type like ["text"] or ["text[]"].',
+                )
+            )
+
+    if "description" in prepared and prepared["description"] is not None:
+        if not isinstance(prepared["description"], str):
+            issues.append(
+                ValidationIssue(
+                    path="property.description",
+                    code="INVALID_TYPE",
+                    message=f"'description' must be a string, got {type(prepared['description']).__name__}.",
+                )
+            )
+
+    for bool_key in (
+        "indexFilterable",
+        "indexSearchable",
+        "indexRangeFilters",
+        "skipVectorization",
+        "vectorizePropertyName",
+    ):
+        if bool_key in prepared and prepared[bool_key] is not None:
+            if not isinstance(prepared[bool_key], bool):
+                issues.append(
+                    ValidationIssue(
+                        path=f"property.{bool_key}",
+                        code="INVALID_TYPE",
+                        message=f"'{bool_key}' must be a boolean, got {type(prepared[bool_key]).__name__}.",
+                    )
+                )
+
+    return prepared, issues
+
+
+def _validate_vector_index_config_fields(
+    vic: Any,
+    *,
+    path_prefix: str,
+    issues: list[ValidationIssue],
+) -> None:
+    if not isinstance(vic, dict):
+        issues.append(
+            ValidationIssue(
+                path=path_prefix,
+                code="INVALID_TYPE",
+                message=f"'{path_prefix}' must be an object, got {type(vic).__name__}.",
+            )
+        )
+        return
+
+    if "distance" in vic and vic["distance"] is not None:
+        dist = vic["distance"]
+        if not isinstance(dist, str) or dist not in VALID_DISTANCE_METRICS:
+            issues.append(
+                ValidationIssue(
+                    path=f"{path_prefix}.distance",
+                    code="INVALID_VALUE",
+                    message=f"Invalid distance metric '{dist}'.",
+                    hint=f"Valid values: {', '.join(sorted(VALID_DISTANCE_METRICS))}.",
+                )
+            )
+
+    if "filterStrategy" in vic and vic["filterStrategy"] is not None:
+        fs = vic["filterStrategy"]
+        if not isinstance(fs, str) or fs not in VALID_FILTER_STRATEGIES:
+            issues.append(
+                ValidationIssue(
+                    path=f"{path_prefix}.filterStrategy",
+                    code="INVALID_VALUE",
+                    message=f"Invalid filterStrategy '{fs}'.",
+                    hint=f"Valid values: {', '.join(sorted(VALID_FILTER_STRATEGIES))}.",
+                )
+            )
+
+    for q_key in ("bq", "pq", "sq", "rq"):
+        if q_key in vic and vic[q_key] is not None and not isinstance(vic[q_key], dict):
+            issues.append(
+                ValidationIssue(
+                    path=f"{path_prefix}.{q_key}",
+                    code="INVALID_TYPE",
+                    message=f"Quantizer '{q_key}' must be an object, got {type(vic[q_key]).__name__}.",
+                )
+            )
+
+    rq = vic.get("rq")
+    if isinstance(rq, dict) and "bits" in rq and rq["bits"] is not None:
+        bits = rq["bits"]
+        if isinstance(bits, bool) or not isinstance(bits, int) or bits not in (1, 4, 8):
+            issues.append(
+                ValidationIssue(
+                    path=f"{path_prefix}.rq.bits",
+                    code="INVALID_VALUE",
+                    message=f"Invalid RQ bits value '{bits}'.",
+                    hint="Use 1, 4, or 8 for rotational quantization bits.",
+                )
+            )
+
+
+def validate_vector_add_spec(
+    spec: dict[str, Any],
+    *,
+    vector_name: str | None = None,
+    available_modules: Collection[str] | None = None,
+) -> tuple[dict[str, dict[str, Any]], list[ValidationIssue]]:
+    """Validate one or more named vector definitions for `collection add-vector`.
+
+    Accepts either:
+    - A single named-vector definition object when ``vector_name`` is given:
+      ``{"vectorizer": {"none": {}}, "vectorIndexType": "hnsw", "vectorIndexConfig": {...}}``
+    - A mapping of ``{vector_name: vector_def, ...}`` (or ``{"vectorConfig": {...}}``).
+    """
+    raw = copy.deepcopy(spec)
+    issues: list[ValidationIssue] = []
+
+    if isinstance(raw.get("data"), dict) and "error" in raw and "metadata" in raw:
+        issues.append(
+            ValidationIssue(
+                path="data",
+                code="UNEXPECTED_ENVELOPE",
+                message="Input looks like a CLI JSON response envelope rather than a vector definition.",
+                hint='Pass a vector map like {"title_vec": {"vectorizer": {"none": {}}}}.',
+            )
+        )
+        return {}, issues
+
+    if vector_name is not None:
+        vectors_map: dict[str, Any] = {vector_name: raw}
+    elif set(raw.keys()) == {"vectorConfig"} and isinstance(raw["vectorConfig"], dict):
+        vectors_map = raw["vectorConfig"]
+    else:
+        vectors_map = raw
+
+    if not vectors_map:
+        issues.append(
+            ValidationIssue(
+                path="vectorConfig",
+                code="MISSING_FIELD",
+                message="At least one named vector definition is required.",
+                hint='Example: {"title_vec": {"vectorizer": {"none": {}}, "vectorIndexType": "hnsw"}}.',
+            )
+        )
+        return {}, issues
+
+    prepared: dict[str, dict[str, Any]] = {}
+    for name, vec_def in vectors_map.items():
+        vec_path = f"vectorConfig.{name}"
+        if not isinstance(name, str) or not _VECTOR_NAME_RE.match(name):
+            issues.append(
+                ValidationIssue(
+                    path=vec_path,
+                    code="INVALID_NAME",
+                    message=f"Invalid named vector name '{name}'.",
+                    hint="Vector names must start with an ASCII letter or underscore and contain only letters, digits, underscores, or hyphens.",
+                )
+            )
+        if not isinstance(vec_def, dict):
+            issues.append(
+                ValidationIssue(
+                    path=vec_path,
+                    code="INVALID_TYPE",
+                    message=f"Named vector '{name}' must be a JSON object, got {type(vec_def).__name__}.",
+                    hint=(
+                        f"If passing a single vector definition, pass VECTOR_NAME on the CLI "
+                        f'or wrap it as {{"{name}": {{"vectorizer": {{"none": {{}}}}}}}}.'
+                    ),
+                )
+            )
+            continue
+
+        vec_mod = vec_def.get("vectorizer")
+        if vec_mod is None:
+            issues.append(
+                ValidationIssue(
+                    path=f"{vec_path}.vectorizer",
+                    code="MISSING_FIELD",
+                    message=f"Named vector '{name}' must include a 'vectorizer' object.",
+                    hint='Example: "vectorizer": {"none": {}} or {"text2vec-transformers": {"properties": ["title"]}}.',
+                )
+            )
+        elif not isinstance(vec_mod, dict) or len(vec_mod) != 1:
+            hint = (
+                f'Use an object keyed by module name: "vectorizer": {{"{vec_mod}": {{}}}}.'
+                if isinstance(vec_mod, str)
+                else 'Use an object with one module key, e.g. {"none": {}} or {"text2vec-weaviate": {}}.'
+            )
+            issues.append(
+                ValidationIssue(
+                    path=f"{vec_path}.vectorizer",
+                    code="INVALID_TYPE",
+                    message=f"Named vector '{name}' 'vectorizer' must be an object with exactly one module key.",
+                    hint=hint,
+                )
+            )
+        else:
+            mod_name, mod_cfg = next(iter(vec_mod.items()))
+            if mod_cfg is not None and not isinstance(mod_cfg, dict):
+                issues.append(
+                    ValidationIssue(
+                        path=f"{vec_path}.vectorizer.{mod_name}",
+                        code="INVALID_TYPE",
+                        message=f"Vectorizer config for '{mod_name}' must be a JSON object.",
+                    )
+                )
+            if (
+                available_modules is not None
+                and isinstance(mod_name, str)
+                and mod_name
+                and mod_name != "none"
+                and mod_name not in set(available_modules)
+            ):
+                available_str = (
+                    ", ".join(sorted(set(available_modules)))
+                    if available_modules
+                    else "none"
+                )
+                issues.append(
+                    ValidationIssue(
+                        path=f"{vec_path}.vectorizer.{mod_name}",
+                        code="MODULE_NOT_ENABLED",
+                        message=f"Module '{mod_name}' is not enabled on this Weaviate cluster.",
+                        hint=(
+                            f"Available modules on this cluster: {available_str}. "
+                            'Use {"none": {}} for bring-your-own vectors.'
+                        ),
+                    )
+                )
+
+        vit = vec_def.get("vectorIndexType")
+        if vit is not None and (
+            not isinstance(vit, str) or vit not in VALID_VECTOR_INDEX_TYPES
+        ):
+            issues.append(
+                ValidationIssue(
+                    path=f"{vec_path}.vectorIndexType",
+                    code="INVALID_VALUE",
+                    message=f"Invalid vectorIndexType '{vit}'.",
+                    hint=f"Valid values: {', '.join(sorted(VALID_VECTOR_INDEX_TYPES))}.",
+                )
+            )
+
+        if "vectorIndexConfig" in vec_def and vec_def["vectorIndexConfig"] is not None:
+            _validate_vector_index_config_fields(
+                vec_def["vectorIndexConfig"],
+                path_prefix=f"{vec_path}.vectorIndexConfig",
+                issues=issues,
+            )
+
+        prepared[name] = vec_def
+
+    return prepared, issues
+
+
+def validate_collection_update_spec(
+    spec: dict[str, Any],
+    *,
+    available_modules: Collection[str] | None = None,
+) -> tuple[dict[str, Any], list[ValidationIssue]]:
+    """Validate a declarative collection update patch JSON object."""
+    prepared = copy.deepcopy(spec)
+    issues: list[ValidationIssue] = []
+
+    if (
+        isinstance(prepared.get("data"), dict)
+        and "error" in prepared
+        and "metadata" in prepared
+    ):
+        issues.append(
+            ValidationIssue(
+                path="data",
+                code="UNEXPECTED_ENVELOPE",
+                message="Input looks like a CLI JSON response envelope rather than an update patch.",
+                hint="Unwrap the inner '.data' object and include only mutable collection fields.",
+            )
+        )
+        return prepared, issues
+
+    if not prepared:
+        issues.append(
+            ValidationIssue(
+                path="",
+                code="EMPTY_UPDATE",
+                message="Collection update patch must specify at least one mutable field.",
+                hint=f"Mutable fields: {', '.join(sorted(KNOWN_UPDATE_TOP_LEVEL_KEYS))}.",
+            )
+        )
+        return prepared, issues
+
+    for key in prepared:
+        if key in KNOWN_UPDATE_TOP_LEVEL_KEYS:
+            continue
+        if key in _IMMUTABLE_UPDATE_KEY_HINTS:
+            issues.append(
+                ValidationIssue(
+                    path=key,
+                    code="IMMUTABLE_FIELD",
+                    message=f"Field '{key}' cannot be modified via 'collection update'.",
+                    hint=_IMMUTABLE_UPDATE_KEY_HINTS[key],
+                )
+            )
+            continue
+        close = difflib.get_close_matches(key, sorted(KNOWN_UPDATE_TOP_LEVEL_KEYS), n=1)
+        hint = (
+            f"Did you mean '{close[0]}'?"
+            if close
+            else f"Mutable top-level keys: {', '.join(sorted(KNOWN_UPDATE_TOP_LEVEL_KEYS))}."
+        )
+        issues.append(
+            ValidationIssue(
+                path=key,
+                code="UNKNOWN_FIELD",
+                message=f"Unknown collection update field '{key}'.",
+                hint=hint,
+            )
+        )
+
+    if "description" in prepared and prepared["description"] is not None:
+        if not isinstance(prepared["description"], str):
+            issues.append(
+                ValidationIssue(
+                    path="description",
+                    code="INVALID_TYPE",
+                    message=f"'description' must be a string, got {type(prepared['description']).__name__}.",
+                )
+            )
+
+    if (
+        "propertyDescriptions" in prepared
+        and prepared["propertyDescriptions"] is not None
+    ):
+        prop_descs = prepared["propertyDescriptions"]
+        if not isinstance(prop_descs, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in prop_descs.items()
+        ):
+            issues.append(
+                ValidationIssue(
+                    path="propertyDescriptions",
+                    code="INVALID_TYPE",
+                    message="'propertyDescriptions' must be an object mapping property names to description strings.",
+                )
+            )
+
+    if (
+        "invertedIndexConfig" in prepared
+        and prepared["invertedIndexConfig"] is not None
+    ):
+        inv = prepared["invertedIndexConfig"]
+        if not isinstance(inv, dict):
+            issues.append(
+                ValidationIssue(
+                    path="invertedIndexConfig",
+                    code="INVALID_TYPE",
+                    message=f"'invertedIndexConfig' must be an object, got {type(inv).__name__}.",
+                )
+            )
+        else:
+            bm25 = inv.get("bm25")
+            if bm25 is not None and not isinstance(bm25, dict):
+                issues.append(
+                    ValidationIssue(
+                        path="invertedIndexConfig.bm25",
+                        code="INVALID_TYPE",
+                        message="'invertedIndexConfig.bm25' must be an object with 'b' and/or 'k1'.",
+                    )
+                )
+            stopwords = inv.get("stopwords")
+            if stopwords is not None:
+                if not isinstance(stopwords, dict):
+                    issues.append(
+                        ValidationIssue(
+                            path="invertedIndexConfig.stopwords",
+                            code="INVALID_TYPE",
+                            message="'invertedIndexConfig.stopwords' must be an object.",
+                        )
+                    )
+                else:
+                    preset = stopwords.get("preset")
+                    if preset is not None and (
+                        not isinstance(preset, str)
+                        or preset not in VALID_STOPWORDS_PRESETS
+                    ):
+                        issues.append(
+                            ValidationIssue(
+                                path="invertedIndexConfig.stopwords.preset",
+                                code="INVALID_VALUE",
+                                message=f"Invalid stopwords preset '{preset}'.",
+                                hint=f"Valid values: {', '.join(sorted(VALID_STOPWORDS_PRESETS))}.",
+                            )
+                        )
+            presets = inv.get("stopwordPresets")
+            if presets is not None and (
+                not isinstance(presets, dict)
+                or not all(
+                    isinstance(k, str)
+                    and isinstance(v, list)
+                    and all(isinstance(item, str) for item in v)
+                    for k, v in presets.items()
+                )
+            ):
+                issues.append(
+                    ValidationIssue(
+                        path="invertedIndexConfig.stopwordPresets",
+                        code="INVALID_TYPE",
+                        message="'invertedIndexConfig.stopwordPresets' must map preset names to lists of strings.",
+                    )
+                )
+
+    if "replicationConfig" in prepared and prepared["replicationConfig"] is not None:
+        repl = prepared["replicationConfig"]
+        if not isinstance(repl, dict):
+            issues.append(
+                ValidationIssue(
+                    path="replicationConfig",
+                    code="INVALID_TYPE",
+                    message=f"'replicationConfig' must be an object, got {type(repl).__name__}.",
+                )
+            )
+        else:
+            factor = repl.get("factor")
+            if factor is not None and (
+                isinstance(factor, bool) or not isinstance(factor, int) or factor < 1
+            ):
+                issues.append(
+                    ValidationIssue(
+                        path="replicationConfig.factor",
+                        code="INVALID_VALUE",
+                        message="'replicationConfig.factor' must be an integer >= 1.",
+                    )
+                )
+            strategy = repl.get("deletionStrategy")
+            if strategy is not None and (
+                not isinstance(strategy, str)
+                or strategy not in VALID_DELETION_STRATEGIES
+            ):
+                issues.append(
+                    ValidationIssue(
+                        path="replicationConfig.deletionStrategy",
+                        code="INVALID_VALUE",
+                        message=f"Invalid deletionStrategy '{strategy}'.",
+                        hint=f"Valid values: {', '.join(sorted(VALID_DELETION_STRATEGIES))}.",
+                    )
+                )
+
+    if "multiTenancyConfig" in prepared and prepared["multiTenancyConfig"] is not None:
+        mt = prepared["multiTenancyConfig"]
+        if not isinstance(mt, dict):
+            issues.append(
+                ValidationIssue(
+                    path="multiTenancyConfig",
+                    code="INVALID_TYPE",
+                    message=f"'multiTenancyConfig' must be an object, got {type(mt).__name__}.",
+                )
+            )
+        else:
+            if "enabled" in mt:
+                issues.append(
+                    ValidationIssue(
+                        path="multiTenancyConfig.enabled",
+                        code="IMMUTABLE_FIELD",
+                        message="'multiTenancyConfig.enabled' cannot be changed after creation.",
+                        hint="Only 'autoTenantCreation' and 'autoTenantActivation' can be updated.",
+                    )
+                )
+            for bkey in ("autoTenantCreation", "autoTenantActivation"):
+                if bkey in mt and not isinstance(mt[bkey], bool):
+                    issues.append(
+                        ValidationIssue(
+                            path=f"multiTenancyConfig.{bkey}",
+                            code="INVALID_TYPE",
+                            message=f"'multiTenancyConfig.{bkey}' must be a boolean.",
+                        )
+                    )
+
+    if "objectTtlConfig" in prepared and prepared["objectTtlConfig"] is not None:
+        ttl = prepared["objectTtlConfig"]
+        if not isinstance(ttl, dict):
+            issues.append(
+                ValidationIssue(
+                    path="objectTtlConfig",
+                    code="INVALID_TYPE",
+                    message=f"'objectTtlConfig' must be an object, got {type(ttl).__name__}.",
+                )
+            )
+
+    if "vectorIndexConfig" in prepared and prepared["vectorIndexConfig"] is not None:
+        _validate_vector_index_config_fields(
+            prepared["vectorIndexConfig"],
+            path_prefix="vectorIndexConfig",
+            issues=issues,
+        )
+
+    if "vectorConfig" in prepared and prepared["vectorConfig"] is not None:
+        vc = prepared["vectorConfig"]
+        if not isinstance(vc, dict):
+            issues.append(
+                ValidationIssue(
+                    path="vectorConfig",
+                    code="INVALID_TYPE",
+                    message=f"'vectorConfig' must be an object mapping vector names to index updates, got {type(vc).__name__}.",
+                )
+            )
+        else:
+            for vec_name, vec_patch in vc.items():
+                vec_path = f"vectorConfig.{vec_name}"
+                if not isinstance(vec_patch, dict):
+                    issues.append(
+                        ValidationIssue(
+                            path=vec_path,
+                            code="INVALID_TYPE",
+                            message=f"Vector update for '{vec_name}' must be an object.",
+                        )
+                    )
+                    continue
+                vit = vec_patch.get("vectorIndexType")
+                if vit is not None and (
+                    not isinstance(vit, str) or vit not in VALID_VECTOR_INDEX_TYPES
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            path=f"{vec_path}.vectorIndexType",
+                            code="INVALID_VALUE",
+                            message=f"Invalid vectorIndexType '{vit}'.",
+                            hint=f"Valid values: {', '.join(sorted(VALID_VECTOR_INDEX_TYPES))}.",
+                        )
+                    )
+                vic = vec_patch.get("vectorIndexConfig", vec_patch)
+                if (
+                    "vectorIndexConfig" in vec_patch
+                    and vec_patch["vectorIndexConfig"] is not None
+                ):
+                    _validate_vector_index_config_fields(
+                        vec_patch["vectorIndexConfig"],
+                        path_prefix=f"{vec_path}.vectorIndexConfig",
+                        issues=issues,
+                    )
+                elif "vectorIndexConfig" not in vec_patch:
+                    _validate_vector_index_config_fields(
+                        vic,
+                        path_prefix=vec_path,
+                        issues=issues,
+                    )
+
+    for mod_field in ("generativeConfig", "rerankerConfig"):
+        if mod_field in prepared and prepared[mod_field] is not None:
+            mod_obj = prepared[mod_field]
+            if not isinstance(mod_obj, dict) or len(mod_obj) != 1:
+                issues.append(
+                    ValidationIssue(
+                        path=mod_field,
+                        code="INVALID_TYPE",
+                        message=f'\'{mod_field}\' must be an object with exactly one module key (e.g. {{"generative-openai": {{"model": "gpt-4o"}}}}).',
+                    )
+                )
+            else:
+                mod_name, mod_cfg = next(iter(mod_obj.items()))
+                if mod_cfg is not None and not isinstance(mod_cfg, dict):
+                    issues.append(
+                        ValidationIssue(
+                            path=f"{mod_field}.{mod_name}",
+                            code="INVALID_TYPE",
+                            message=f"Module config for '{mod_name}' must be an object.",
+                        )
+                    )
+                if (
+                    available_modules is not None
+                    and isinstance(mod_name, str)
+                    and mod_name
+                    and mod_name != "none"
+                    and mod_name not in set(available_modules)
+                ):
+                    available_str = (
+                        ", ".join(sorted(set(available_modules)))
+                        if available_modules
+                        else "none"
+                    )
+                    issues.append(
+                        ValidationIssue(
+                            path=f"{mod_field}.{mod_name}",
+                            code="MODULE_NOT_ENABLED",
+                            message=f"Module '{mod_name}' is not enabled on this Weaviate cluster.",
+                            hint=f"Available modules on this cluster: {available_str}.",
+                        )
+                    )
 
     return prepared, issues

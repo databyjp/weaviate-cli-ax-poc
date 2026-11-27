@@ -144,6 +144,8 @@ def test_tenant_list_and_not_found_contracts(cli_runner: CliRunner):
     [
         ["collection", "delete", "Articles"],
         ["collection", "delete", "--all"],
+        ["collection", "delete-vector", "Articles", "title_vec"],
+        ["tenant", "delete", "tenant-a", "--collection", "Articles"],
         ["role", "delete", "viewer"],
         ["user", "delete", "temp-user"],
         ["backup", "restore", "bk-1", "--backend", "s3"],

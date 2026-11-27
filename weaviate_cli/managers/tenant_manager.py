@@ -13,6 +13,36 @@ from weaviate_cli.defaults import (
 )
 from weaviate_cli.errors import CLIError, ExitCode
 
+TENANT_MUTABLE_STATE_MAP: dict[str, TenantActivityStatus] = {
+    "hot": TenantActivityStatus.ACTIVE,
+    "active": TenantActivityStatus.ACTIVE,
+    "cold": TenantActivityStatus.INACTIVE,
+    "inactive": TenantActivityStatus.INACTIVE,
+    "frozen": TenantActivityStatus.OFFLOADED,
+    "offloaded": TenantActivityStatus.OFFLOADED,
+}
+
+TENANT_FILTER_STATE_MAP: dict[str, TenantActivityStatus] = {
+    **TENANT_MUTABLE_STATE_MAP,
+    "offloading": TenantActivityStatus.OFFLOADING,
+    "onloading": TenantActivityStatus.ONLOADING,
+}
+
+_NORMALIZE_STATUS_MAP: dict[TenantActivityStatus, TenantActivityStatus] = {
+    TenantActivityStatus.ACTIVE: TenantActivityStatus.ACTIVE,
+    TenantActivityStatus.HOT: TenantActivityStatus.ACTIVE,
+    TenantActivityStatus.INACTIVE: TenantActivityStatus.INACTIVE,
+    TenantActivityStatus.COLD: TenantActivityStatus.INACTIVE,
+    TenantActivityStatus.OFFLOADED: TenantActivityStatus.OFFLOADED,
+    TenantActivityStatus.FROZEN: TenantActivityStatus.OFFLOADED,
+    TenantActivityStatus.OFFLOADING: TenantActivityStatus.OFFLOADING,
+    TenantActivityStatus.ONLOADING: TenantActivityStatus.ONLOADING,
+}
+
+
+def _normalize_activity_status(status: TenantActivityStatus) -> TenantActivityStatus:
+    return _NORMALIZE_STATUS_MAP.get(status, status)
+
 
 class TenantManager:
     def __init__(self, client: WeaviateClient):
@@ -57,24 +87,26 @@ class TenantManager:
                 hint='Enable "multiTenancyConfig": {"enabled": true} when creating the collection.',
             )
 
-        tenant_state_map = {
-            "hot": TenantActivityStatus.ACTIVE,
-            "active": TenantActivityStatus.ACTIVE,
-            "cold": TenantActivityStatus.INACTIVE,
-            "inactive": TenantActivityStatus.INACTIVE,
-            "frozen": TenantActivityStatus.OFFLOADED,
-            "offloaded": TenantActivityStatus.OFFLOADED,
-        }
+        target_status = TENANT_MUTABLE_STATE_MAP[state]
 
-        # Fetch existing tenants once to avoid redundant network calls
-        existing_tenants = col.tenants.get()
+        # When explicit tenant names are provided, check existence with targeted
+        # get_by_names() (>= 1.25.0) instead of scanning every tenant in the collection.
+        deduped_list: list[str] | None = None
+        if tenants_list is not None:
+            deduped_list = list(dict.fromkeys(tenants_list))
+            if version.compare(semver.Version.parse("1.25.0")) < 0:
+                existing_tenants = col.tenants.get()
+            else:
+                existing_tenants = col.tenants.get_by_names(deduped_list)
+        else:
+            existing_tenants = col.tenants.get()
 
         # Resolve tenant names to create
         new_tenant_names = self._resolve_tenant_names_to_create(
             existing_tenants=existing_tenants,
             tenant_suffix=tenant_suffix,
             number_tenants=number_tenants,
-            tenants_list=tenants_list,
+            tenants_list=deduped_list,
         )
 
         # Filter out already existing tenants
@@ -84,7 +116,7 @@ class TenantManager:
 
         # Create the new tenants
         tenants = [
-            Tenant(name=name, activity_status=tenant_state_map[state])
+            Tenant(name=name, activity_status=target_status)
             for name in new_tenant_names
         ]
 
@@ -116,10 +148,10 @@ class TenantManager:
             collection=col,
             version=version,
             new_tenant_names=new_tenant_names,
-            expected_status=tenant_state_map[state],
+            expected_status=target_status,
         )
 
-        status_label = tenant_state_map[state].value
+        status_label = target_status.value
         if json_output:
             click.echo(
                 json.dumps(
@@ -271,9 +303,10 @@ class TenantManager:
                     message=f"No tenants present in class {col.name}.",
                     exit_code=ExitCode.NOT_FOUND,
                 )
-            else:
-                col.tenants.remove(list(deleting_tenants.values()))
+            col.tenants.remove(list(deleting_tenants.values()))
 
+        except CLIError:
+            raise
         except Exception as e:
             raise Exception(f"Failed to delete tenants: {e}") from e
 
@@ -301,6 +334,10 @@ class TenantManager:
         self,
         collection: str | None = GetTenantsDefaults.collection,
         tenant_id: str | None = GetTenantsDefaults.tenant_id,
+        tenant_ids: list[str] | None = None,
+        state: str | None = None,
+        prefix: str | None = None,
+        limit: int | None = None,
         verbose: bool = GetTenantsDefaults.verbose,
         json_output: bool = False,
     ) -> dict:
@@ -311,95 +348,155 @@ class TenantManager:
                 message="Collection name is required.",
                 exit_code=ExitCode.USAGE,
             )
-        if tenant_id:
-            tenants = self.client.collections.get(collection).tenants.get_by_names(
-                [tenant_id]
+
+        if limit is not None and limit < 1:
+            raise CLIError(
+                code="INVALID_LIMIT",
+                message="--limit must be a positive integer (>= 1).",
+                exit_code=ExitCode.USAGE,
             )
-            if not tenants:
+
+        target_state: TenantActivityStatus | None = None
+        if state is not None:
+            normalized_key = state.lower()
+            if normalized_key not in TENANT_FILTER_STATE_MAP:
+                valid = ", ".join(sorted(TENANT_FILTER_STATE_MAP.keys()))
+                raise CLIError(
+                    code="INVALID_TENANT_STATE",
+                    message=f"Invalid tenant state filter '{state}'.",
+                    exit_code=ExitCode.USAGE,
+                    hint=f"Valid states: {valid}.",
+                )
+            target_state = TENANT_FILTER_STATE_MAP[normalized_key]
+
+        requested_names: list[str] = []
+        if tenant_id:
+            requested_names.append(tenant_id)
+        if tenant_ids:
+            requested_names.extend(tenant_ids)
+        requested_names = list(dict.fromkeys(requested_names))
+
+        missing_names: list[str] = []
+        if requested_names:
+            all_tenants = self.client.collections.get(collection).tenants.get_by_names(
+                requested_names
+            )
+            if not all_tenants:
+                if len(requested_names) == 1:
+                    msg = (
+                        f"Tenant '{requested_names[0]}' not found in class {collection}"
+                    )
+                else:
+                    msg = f"None of the requested tenants ({', '.join(requested_names)}) were found in class {collection}"
                 raise CLIError(
                     code="TENANT_NOT_FOUND",
-                    message=f"Tenant '{tenant_id}' not found in class {collection}",
+                    message=msg,
                     exit_code=ExitCode.NOT_FOUND,
                 )
+            missing_names = [n for n in requested_names if n not in all_tenants]
         else:
-            tenants = self.client.collections.get(collection).tenants.get()
+            all_tenants = self.client.collections.get(collection).tenants.get()
+
+        has_filter = prefix is not None or target_state is not None
+        if has_filter:
+            filtered = {
+                name: tenant
+                for name, tenant in sorted(all_tenants.items())
+                if (prefix is None or name.startswith(prefix))
+                and (
+                    target_state is None
+                    or _normalize_activity_status(tenant.activity_status)
+                    == target_state
+                )
+            }
+        elif limit is not None:
+            filtered = dict(sorted(all_tenants.items()))
+        else:
+            filtered = all_tenants
+
+        if limit is not None and len(filtered) > limit:
+            displayed = dict(list(filtered.items())[:limit])
+        else:
+            displayed = filtered
+
+        counts = {
+            TenantActivityStatus.ACTIVE: 0,
+            TenantActivityStatus.INACTIVE: 0,
+            TenantActivityStatus.OFFLOADED: 0,
+            TenantActivityStatus.OFFLOADING: 0,
+            TenantActivityStatus.ONLOADING: 0,
+        }
+        for tenant in filtered.values():
+            norm = _normalize_activity_status(tenant.activity_status)
+            if norm in counts:
+                counts[norm] += 1
+
+        truncated = len(displayed) < len(filtered)
 
         if json_output:
-            tenants_data = []
-            for name, tenant in tenants.items():
-                tenants_data.append(
-                    {"name": name, "activity_status": tenant.activity_status.value}
-                )
-            active = sum(
-                1
-                for t in tenants.values()
-                if t.activity_status == TenantActivityStatus.ACTIVE
-            )
-            inactive = sum(
-                1
-                for t in tenants.values()
-                if t.activity_status == TenantActivityStatus.INACTIVE
-            )
-            offloaded = sum(
-                1
-                for t in tenants.values()
-                if t.activity_status == TenantActivityStatus.OFFLOADED
-            )
-            click.echo(
-                json.dumps(
-                    {
-                        "tenants": tenants_data,
-                        "summary": {
-                            "total": len(tenants),
-                            "active": active,
-                            "inactive": inactive,
-                            "offloaded": offloaded,
-                        },
-                    },
-                    indent=2,
-                    default=str,
-                )
-            )
-            return tenants
+            tenants_data = [
+                {"name": name, "activity_status": tenant.activity_status.value}
+                for name, tenant in displayed.items()
+            ]
+            summary: dict = {
+                "total": len(filtered),
+                "active": counts[TenantActivityStatus.ACTIVE],
+                "inactive": counts[TenantActivityStatus.INACTIVE],
+                "offloaded": counts[TenantActivityStatus.OFFLOADED],
+                "offloading": counts[TenantActivityStatus.OFFLOADING],
+                "onloading": counts[TenantActivityStatus.ONLOADING],
+                "returned": len(displayed),
+                "truncated": truncated,
+            }
+            if has_filter:
+                summary["total_unfiltered"] = len(all_tenants)
+            payload: dict = {
+                "tenants": tenants_data,
+                "summary": summary,
+            }
+            if missing_names:
+                payload["missing"] = missing_names
+            click.echo(json.dumps(payload, indent=2, default=str))
+            return displayed
 
         if verbose:
             click.echo(f"{'Tenant Name':<30}{'Activity Status':<20}")
-            for name, tenant in tenants.items():
+            for name, tenant in displayed.items():
                 click.echo(f"{name:<30}{tenant.activity_status.value:<20}")
-        else:
-            active_tenants = [
-                tenant
-                for name, tenant in tenants.items()
-                if tenant.activity_status == TenantActivityStatus.ACTIVE
-            ]
-            inactive_tenants = [
-                tenant
-                for name, tenant in tenants.items()
-                if tenant.activity_status == TenantActivityStatus.INACTIVE
-            ]
-            offoaded_tenants = [
-                tenant
-                for name, tenant in tenants.items()
-                if tenant.activity_status == TenantActivityStatus.OFFLOADED
-            ]
-
-            click.echo(
-                f"{'Number Tenants':<20}{'Cold Tenants':<20}{'Hot Tenants': <20}{'Offloaded Tenants':<20}"
-            )
-            click.echo(
-                f"{len(tenants):<20}{len(inactive_tenants):<20}{len(active_tenants):<20}{len(offoaded_tenants):<20}"
-            )
-            if tenants:
-                max_preview = 20
-                items = list(tenants.items())
-                preview = ", ".join(
-                    f"{name} ({t.activity_status.value})"
-                    for name, t in items[:max_preview]
+            if truncated:
+                click.echo(
+                    f"Showing {len(displayed)} of {len(filtered)} matching tenant(s) (truncated by --limit)."
                 )
-                if len(items) > max_preview:
-                    preview += f", ... (+{len(items) - max_preview} more; use --verbose or --json)"
+        else:
+            click.echo(
+                f"{'Number Tenants':<18}{'Active':<12}{'Inactive':<12}"
+                f"{'Offloaded':<12}{'Offloading':<12}{'Onloading':<12}"
+            )
+            click.echo(
+                f"{len(filtered):<18}{counts[TenantActivityStatus.ACTIVE]:<12}"
+                f"{counts[TenantActivityStatus.INACTIVE]:<12}"
+                f"{counts[TenantActivityStatus.OFFLOADED]:<12}"
+                f"{counts[TenantActivityStatus.OFFLOADING]:<12}"
+                f"{counts[TenantActivityStatus.ONLOADING]:<12}"
+            )
+            if displayed:
+                max_preview = limit if limit is not None else 20
+                items = list(displayed.items())
+                preview_items = items[:max_preview]
+                preview = ", ".join(
+                    f"{name} ({t.activity_status.value})" for name, t in preview_items
+                )
+                remaining = len(filtered) - len(preview_items)
+                if remaining > 0:
+                    preview += (
+                        f", ... (+{remaining} more; use --verbose, --limit, or --json)"
+                    )
                 click.echo(f"Tenants: {preview}")
-        return tenants
+
+        if missing_names:
+            click.echo(f"Missing: {', '.join(missing_names)}")
+
+        return displayed
 
     def update_tenants(
         self,
@@ -436,23 +533,7 @@ class TenantManager:
                 exit_code=ExitCode.USAGE,
             )
 
-        tenant_state_map = {
-            "hot": TenantActivityStatus.ACTIVE,
-            "active": TenantActivityStatus.ACTIVE,
-            "cold": TenantActivityStatus.INACTIVE,
-            "inactive": TenantActivityStatus.INACTIVE,
-            "frozen": TenantActivityStatus.OFFLOADED,
-            "offloaded": TenantActivityStatus.OFFLOADED,
-        }
-
-        equivalent_state_map = {
-            "hot": TenantActivityStatus.ACTIVE,
-            "active": TenantActivityStatus.ACTIVE,
-            "cold": TenantActivityStatus.INACTIVE,
-            "inactive": TenantActivityStatus.INACTIVE,
-            "frozen": TenantActivityStatus.OFFLOADED,
-            "offloaded": TenantActivityStatus.OFFLOADED,
-        }
+        target_status = TENANT_MUTABLE_STATE_MAP[state]
 
         tenants_with_suffix: dict = {}
         if tenants is None:
@@ -481,8 +562,8 @@ class TenantManager:
 
         tenants_to_update = [
             (
-                Tenant(name=name, activity_status=tenant_state_map[state])
-                if tenant.activity_status != tenant_state_map[state]
+                Tenant(name=name, activity_status=target_status)
+                if tenant.activity_status != target_status
                 else tenant
             )
             for name, tenant in existing_tenants.items()
@@ -513,12 +594,12 @@ class TenantManager:
             assert len(tenants_list) == len(clean), (
                 f"Expected {len(clean)} tenants, but found {len(tenants_list)}"
             )
-        last_status = equivalent_state_map[state]
+        last_status = target_status
         for tenant in tenants_list.values():
             last_status = tenant.activity_status
-            if tenant.activity_status != equivalent_state_map[state]:
+            if tenant.activity_status != target_status:
                 raise Exception(
-                    f"Tenant '{tenant.name}' has activity status '{tenant.activity_status.value}', but expected '{equivalent_state_map[state].value}'"
+                    f"Tenant '{tenant.name}' has activity status '{tenant.activity_status.value}', but expected '{target_status.value}'"
                 )
         status_label = last_status.value
         if json_output:
