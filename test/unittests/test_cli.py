@@ -104,7 +104,7 @@ def test_main_noun_verb_commands_registered():
         "node": {"list"},
         "shard": {"list", "update", "state"},
         "replication": {"create", "list", "get", "cancel", "delete"},
-        "backup": {"create", "get", "restore", "cancel"},
+        "backup": {"list", "create", "get", "restore", "cancel"},
         "export": {"create", "get", "cancel"},
         "role": {
             "create",

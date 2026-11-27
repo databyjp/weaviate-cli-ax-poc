@@ -99,7 +99,7 @@ weaviate-cli [--env-file .env] status
 | `node` | `list` | Cluster node health, versions, shards, and collections |
 | `shard` | `list`, `update`, `state` | Shard health, status transitions (`READY`/`READONLY`), and sharding state |
 | `replication` | `create`, `list`, `get`, `cancel`, `delete` | Cross-node shard `COPY`/`MOVE` replication operations |
-| `backup` | `create`, `get`, `restore`, `cancel` | Cluster/collection backup and restore (`s3`, `gcs`, `filesystem`) |
+| `backup` | `list`, `create`, `get`, `restore`, `cancel` | Cluster/collection/RBAC backup and restore (`s3`, `gcs`, `azure`, `filesystem`) |
 | `export` | `create`, `get`, `cancel` | Collection Parquet export (`filesystem`, `s3`, `gcs`, `azure`) |
 | `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission` | RBAC role and permission administration |
 | `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management and API key rotation |

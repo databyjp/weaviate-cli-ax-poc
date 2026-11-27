@@ -63,12 +63,17 @@ class CreateTenantsDefaults:
 @dataclass
 class CreateBackupDefaults:
     backend: str = "s3"
-    backup_id: str = "test-backup"
+    backup_id: str | None = None
     incremental_base_backup_id: str | None = None
     include: str | None = None
     exclude: str | None = None
     wait: bool = False
     cpu_for_backup: int = 40
+    compression_level: str | None = None
+    bucket: str | None = None
+    path: str | None = None
+    include_roles: str | None = None
+    include_users: str | None = None
 
 
 @dataclass
@@ -80,7 +85,10 @@ class CreateRoleDefaults:
 @dataclass
 class CancelBackupDefaults:
     backend: str = "s3"
-    backup_id: str = "test-backup"
+    backup_id: str | None = None
+    restore: bool = False
+    bucket: str | None = None
+    path: str | None = None
 
 
 @dataclass
@@ -142,11 +150,16 @@ class GetUserDefaults:
 @dataclass
 class RestoreBackupDefaults:
     backend: str = "s3"
-    backup_id: str = "test-backup"
+    backup_id: str | None = None
     wait: bool = False
     include: str | None = None
     exclude: str | None = None
     override_alias: bool = False
+    roles_restore: str | None = None
+    users_restore: str | None = None
+    cpu_for_restore: int | None = None
+    bucket: str | None = None
+    path: str | None = None
 
 
 @dataclass
@@ -205,7 +218,7 @@ class GetAliasDefaults:
 
 @dataclass
 class CreateExportCollectionDefaults:
-    export_id: str = "test-export"
+    export_id: str | None = None
     backend: str = "filesystem"
     file_format: str = "parquet"
     include: str | None = None
@@ -215,11 +228,11 @@ class CreateExportCollectionDefaults:
 
 @dataclass
 class GetExportCollectionDefaults:
-    export_id: str = "test-export"
+    export_id: str | None = None
     backend: str = "filesystem"
 
 
 @dataclass
 class CancelExportCollectionDefaults:
-    export_id: str = "test-export"
+    export_id: str | None = None
     backend: str = "filesystem"
