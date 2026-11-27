@@ -90,7 +90,7 @@ weaviate-cli [--env-file .env] status
 | `status` | *(top-level)* | Live readiness, version, RBAC identity, collections/nodes summary, enabled vectorizers/modules, `/v1/mcp` probe |
 | `guide` | *(top-level)* | Compact Markdown guide or `--schema` JSON command tree |
 | `config` | `show` | Offline inspection of resolved target URL, gRPC endpoint, precedence source, and redacted auth |
-| `mcp` | `config` | Generate Streamable HTTP `/v1/mcp` config (`generic`, `claude-code`, `cursor`, `vscode`) with optional `--check` |
+| `mcp` | `config` | Generate Streamable HTTP `/v1/mcp` config (`generic`, `claude-code`, `claude-desktop`, `cursor`, `vscode`) with optional `--check` |
 | `local` | `start`, `template`, `stop`, `status`, `logs`, `destroy` | Managed local Docker Compose cluster (`weaviate-cli-local`) |
 | `cloud` | `install-wcloud`, `login`, `whoami`, `logout`, `regions`, `create`, `list`, `get`, `status` | Weaviate Cloud lifecycle delegated to `wcloud` |
 | `collection` | `create`, `list`, `get`, `add-property`, `add-vector`, `delete-vector`, `update`, `delete` | Declarative JSON collection DDL, schema evolution, and config updates |

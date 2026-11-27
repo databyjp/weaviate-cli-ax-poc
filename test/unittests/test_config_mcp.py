@@ -283,3 +283,39 @@ def test_mcp_config_text_mode_renders_snippet_and_guide_topic(cli_runner, tmp_pa
     assert guide_res.exit_code == 0, guide_res.stderr
     assert "weaviate-collections-get-config" in guide_res.stdout
     assert "weaviate-cli mcp config" in guide_res.stdout
+
+
+def test_mcp_config_cursor_streamable_http_and_claude_desktop_proxy(
+    cli_runner, tmp_path
+):
+    with patch.dict(
+        "os.environ",
+        {
+            "HOME": str(tmp_path),
+            "WEAVIATE_URL": "https://demo.weaviate.cloud",
+            "WEAVIATE_API_KEY": "secret-key",
+        },
+        clear=True,
+    ):
+        cursor_res = cli_runner.invoke(main, ["mcp", "config", "--client", "cursor"])
+        desktop_res = cli_runner.invoke(
+            main, ["mcp", "config", "--client", "claude-desktop"]
+        )
+
+    assert cursor_res.exit_code == 0, cursor_res.stderr
+    cursor_entry = json.loads(cursor_res.stdout)["data"]["config"]["mcpServers"][
+        "weaviate"
+    ]
+    assert cursor_entry["type"] == "streamable-http"
+
+    assert desktop_res.exit_code == 0, desktop_res.stderr
+    assert "secret-key" not in desktop_res.stdout
+    desktop_data = json.loads(desktop_res.stdout)["data"]
+    assert desktop_data["config_file_hint"] == "claude_desktop_config.json"
+    assert desktop_data["transport"] == "stdio-proxy"
+    desktop_entry = desktop_data["config"]["mcpServers"]["weaviate"]
+    assert desktop_entry["command"] == "mcp-proxy"
+    assert "--transport" in desktop_entry["args"]
+    assert "streamablehttp" in desktop_entry["args"]
+    assert "Bearer ${WEAVIATE_API_KEY}" in desktop_entry["args"]
+    assert desktop_entry["args"][-1] == "https://demo.weaviate.cloud/v1/mcp"

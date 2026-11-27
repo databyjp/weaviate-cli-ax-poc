@@ -45,13 +45,37 @@ def _is_auth_or_not_supported_error(exc: Exception) -> bool:
     return False
 
 
+def _parse_mcp_jsonrpc_body(response: httpx.Response) -> dict[str, Any] | None:
+    """Parse a Streamable HTTP MCP response (application/json or text/event-stream)."""
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "text/event-stream" in content_type:
+        for line in response.text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("data:"):
+                raw = stripped[len("data:") :].strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = httpx.Response(200, content=raw.encode("utf-8")).json()
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    continue
+        return None
+    try:
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
 def probe_mcp_endpoint(
     rest_base_url: str,
     api_key: str | None = None,
     *,
     timeout: float = 3.0,
 ) -> dict[str, Any]:
-    """Probe Weaviate's native /v1/mcp Streamable HTTP endpoint."""
+    """Probe Weaviate's native /v1/mcp Streamable HTTP endpoint (including tools/list)."""
     endpoint = f"{rest_base_url.rstrip('/')}/v1/mcp"
     headers = {
         "Content-Type": "application/json",
@@ -84,7 +108,39 @@ def probe_mcp_endpoint(
     if response.status_code == 404:
         return {"endpoint": endpoint, "available": False}
     if 200 <= response.status_code < 300:
-        return {"endpoint": endpoint, "available": True}
+        probe_result: dict[str, Any] = {"endpoint": endpoint, "available": True}
+        tools_headers = dict(headers)
+        session_id = response.headers.get("mcp-session-id")
+        if session_id:
+            tools_headers["Mcp-Session-Id"] = session_id
+        try:
+            tools_resp = httpx.post(
+                endpoint,
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                headers=tools_headers,
+                timeout=timeout,
+                follow_redirects=True,
+            )
+            if 200 <= tools_resp.status_code < 300:
+                body = _parse_mcp_jsonrpc_body(tools_resp)
+                raw_tools = (
+                    body.get("result", {}).get("tools")
+                    if isinstance(body, dict) and isinstance(body.get("result"), dict)
+                    else None
+                )
+                if isinstance(raw_tools, list):
+                    tool_names = sorted(
+                        str(t["name"])
+                        for t in raw_tools
+                        if isinstance(t, dict) and t.get("name")
+                    )
+                    probe_result["tools"] = tool_names
+                    probe_result["write_enabled"] = (
+                        "weaviate-objects-upsert" in tool_names
+                    )
+        except httpx.HTTPError:
+            pass
+        return probe_result
     if response.status_code in {401, 403}:
         return {"endpoint": endpoint, "available": True, "auth_required": True}
     return {
