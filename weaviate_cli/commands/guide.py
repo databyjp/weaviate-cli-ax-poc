@@ -8,6 +8,7 @@ import click
 
 from weaviate_cli import __version__
 from weaviate_cli.errors import CLIError, ExitCode
+from weaviate_cli.managers.cloud_manager import FREE_TIER_LIMITS_SUMMARY
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
     RuntimeContext,
@@ -155,6 +156,7 @@ def render_guide_markdown(
         if topic == "cloud":
             extra_notes = [
                 "## Important notes for Weaviate Cloud",
+                f"- **Free-tier limits:** {FREE_TIER_LIMITS_SUMMARY} Creating a second collection fails with HTTP 429 (`USAGE_LIMIT_EXCEEDED`), and `SUSPENDED` free clusters still count toward the 1-cluster-per-user limit across all organizations.",
                 "- **One-time admin API key:** `cloud create --wait` and `cloud get` require `--write-env`, `--write-config`, or `--include-key`. Use a durable path in `.gitignore`, not `.venv/`. Existing credentials block the call. Use `cloud status` for polling without consuming a key.",
                 "- If every file save fails after issuance, recover the key from stdout even on exit 1. Do not log the output or repeat provisioning.",
                 "- **Browser OAuth login:** `cloud login` requires an interactive terminal with a local browser (`127.0.0.1` loopback). Run `cloud whoami` first; in non-TTY shells, fail fast and ask the user to run `weaviate-cli cloud login`.",
@@ -167,6 +169,7 @@ def render_guide_markdown(
                 "- **Built-in server:** Available directly on Weaviate v1.37.1+ via Streamable HTTP at `<WEAVIATE_URL>/v1/mcp` (enabled by default on Weaviate Cloud and by `weaviate-cli local start`).",
                 "- **Exposed tools:** `weaviate-collections-get-config`, `weaviate-tenants-list`, `weaviate-query-hybrid`, and `weaviate-objects-upsert` (authenticated with your Bearer API key under standard RBAC).",
                 "- **Secret safety:** `mcp config` references `${WEAVIATE_API_KEY}` (or `${env:WEAVIATE_API_KEY}` for VS Code) by default so credentials are not printed or committed; pass `--include-key` only when explicitly embedding a key into a gitignored client config.",
+                '- **Claude Desktop (`--client claude-desktop`):** Bridges Streamable HTTP over stdio using `mcp-proxy` (not bundled with `weaviate-cli`). Install it separately (`uv tool install mcp-proxy`, `pipx install mcp-proxy`, or `pip install mcp-proxy`) and, if Claude Desktop\'s GUI `PATH` cannot locate it, set `"command"` to the absolute path from `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` (Windows).',
                 "",
             ]
         lines = [
@@ -200,7 +203,7 @@ def render_guide_markdown(
         "- Non-TTY stdout automatically emits a `data`/`error`/`metadata` JSON envelope (override with `--json` / `--no-json`).",
         "- Errors and warnings go to `stderr` in text mode; `stdout` stays clean.",
         "- Exit codes: `0` ok, `1` runtime/server, `2` usage/validation, `3` auth/RBAC, `4` not found/conflict, `5` connectivity.",
-        "- Bulk destructive actions require `--yes` (e.g. `collection delete --all --yes`).",
+        "- Destructive actions require `--yes` (e.g. `collection delete Articles --yes`, `collection delete-vector Articles vec --yes`, `tenant delete t1 --collection Articles --yes`, `role delete <name> --yes`).",
         "",
         "## Command map",
     ]
@@ -239,7 +242,7 @@ def render_guide_markdown(
             "weaviate-cli --env-file .env collection create --from-file schema.json --dry-run --check-cluster",
             "weaviate-cli --env-file .env collection create --from-file schema.json",
             "weaviate-cli --env-file .env collection get Articles",
-            "weaviate-cli --env-file .env collection delete Articles",
+            "weaviate-cli --env-file .env collection delete Articles --yes",
             "",
             "# Drill into one group or fetch full machine-readable command schema",
             "weaviate-cli guide collection",

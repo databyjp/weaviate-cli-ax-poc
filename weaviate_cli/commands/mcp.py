@@ -20,11 +20,14 @@ from weaviate_cli.runtime import (
     handle_command_error,
 )
 
-McpClientFormat = Literal["generic", "claude-code", "cursor", "vscode"]
+McpClientFormat = Literal[
+    "generic", "claude-code", "claude-desktop", "cursor", "vscode"
+]
 
 _CONFIG_FILE_HINTS: dict[McpClientFormat, str] = {
     "generic": "mcp.json",
     "claude-code": ".mcp.json",
+    "claude-desktop": "claude_desktop_config.json",
     "cursor": ".cursor/mcp.json",
     "vscode": ".vscode/mcp.json",
 }
@@ -62,11 +65,38 @@ def build_mcp_config(
             auth_header_value = "Bearer ${WEAVIATE_API_KEY}"
             auth_mode = "env_placeholder"
 
-    server_entry: dict[str, Any] = {"url": endpoint}
-    if client in {"generic", "claude-code", "vscode"}:
+    transport = "streamable-http"
+    prerequisites: list[str] = []
+    if client == "claude-desktop":
+        args = ["--transport", "streamablehttp"]
+        if auth_header_value is not None:
+            args.extend(["-H", "Authorization", auth_header_value])
+        args.append(endpoint)
+        server_entry: dict[str, Any] = {"command": "mcp-proxy", "args": args}
+        transport = "stdio-proxy"
+        prerequisites.append(
+            "Install 'mcp-proxy' (not bundled with weaviate-cli): "
+            "e.g. 'uv tool install mcp-proxy', 'pipx install mcp-proxy', or 'pip install mcp-proxy'."
+        )
+        prerequisites.append(
+            "Claude Desktop runs with a minimal GUI PATH: run 'which mcp-proxy' (macOS/Linux) "
+            "or 'where mcp-proxy' (Windows) and replace '\"command\": \"mcp-proxy\"' with the "
+            "absolute executable path if Claude Desktop cannot find it."
+        )
+        if auth_mode == "env_placeholder":
+            prerequisites.append(
+                "Claude Desktop does not inherit shell env vars or expand '${WEAVIATE_API_KEY}' "
+                "in args: replace the placeholder with your API key or re-run with '--include-key' "
+                "when writing to your local claude_desktop_config.json."
+            )
+    elif client == "cursor":
+        server_entry = {"type": "streamable-http", "url": endpoint}
+        if auth_header_value is not None:
+            server_entry["headers"] = {"Authorization": auth_header_value}
+    else:
         server_entry = {"type": "http", "url": endpoint}
-    if auth_header_value is not None:
-        server_entry["headers"] = {"Authorization": auth_header_value}
+        if auth_header_value is not None:
+            server_entry["headers"] = {"Authorization": auth_header_value}
 
     if client == "vscode":
         config_snippet: dict[str, Any] = {"servers": {cleaned_name: server_entry}}
@@ -100,11 +130,12 @@ def build_mcp_config(
         "client": client,
         "server_name": cleaned_name,
         "endpoint": endpoint,
-        "transport": "streamable-http",
+        "transport": transport,
         "config_file_hint": _CONFIG_FILE_HINTS[client],
         "auth_mode": auth_mode,
         "config": config_snippet,
         "cli_command": cli_command,
+        "prerequisites": prerequisites,
     }
 
 
@@ -125,12 +156,19 @@ def _render_mcp_config_text(data: dict[str, Any]) -> None:
         )
     if data.get("cli_command"):
         click.echo(f"CLI command: {data['cli_command']}")
+    prerequisites = data.get("prerequisites")
+    if isinstance(prerequisites, list) and prerequisites:
+        click.echo("Prerequisites:")
+        for item in prerequisites:
+            click.echo(f"  - {item}")
     probe = data.get("probe")
     if isinstance(probe, dict):
         avail = probe.get("available")
         state = "reachable" if avail is True else "unavailable"
         if probe.get("auth_required"):
             state += " (auth required)"
+        elif isinstance(probe.get("write_enabled"), bool):
+            state += " (read+write)" if probe["write_enabled"] else " (read-only)"
         click.echo(f"Live probe:  {state}")
 
 
@@ -156,14 +194,20 @@ def mcp_group() -> None:
         "  weaviate-cli mcp config\n"
         "  weaviate-cli --env-file .env mcp config --client claude-code\n"
         "  weaviate-cli --env-file .env mcp config --client cursor --check\n"
-        "  weaviate-cli --env-file .env mcp config --client vscode --include-key"
+        "  weaviate-cli --env-file .env mcp config --client claude-desktop\n"
+        "  weaviate-cli --env-file .env mcp config --client vscode --include-key\n"
+        "\n\b\n"
+        "Note: --client claude-desktop bridges Streamable HTTP via 'mcp-proxy' "
+        "(install separately, e.g. 'uv tool install mcp-proxy' or 'pipx install mcp-proxy', "
+        "and use its absolute path from 'which mcp-proxy' if needed by Claude Desktop)."
     ),
 )
 @click.option(
     "--client",
     "client_format",
     type=click.Choice(
-        ["generic", "claude-code", "cursor", "vscode"], case_sensitive=False
+        ["generic", "claude-code", "claude-desktop", "cursor", "vscode"],
+        case_sensitive=False,
     ),
     default="generic",
     show_default=True,

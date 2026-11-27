@@ -81,7 +81,7 @@ weaviate-cli [--env-file .env] status
   - `3`: Authentication / RBAC / `wcloud` login required
   - `4`: Resource not found or conflict
   - `5`: Connectivity / Docker / `wcloud` / `/v1/mcp` unavailable
-- **Destructive confirmation**: Bulk or irreversible commands require `--yes` (e.g., `local destroy --yes`, `collection delete --all --yes`, `role delete <name> --yes`, `user delete <name> --yes`, `backup restore <id> --yes`, `replication delete --all --yes`, `shard update --all --yes`).
+- **Destructive confirmation**: Bulk or irreversible commands require `--yes` (e.g., `local destroy --yes`, `collection delete Articles --yes`, `collection delete --all --yes`, `collection delete-vector Articles vec --yes`, `tenant delete t1 --collection Articles --yes`, `role delete <name> --yes`, `user delete <name> --yes`, `backup restore <id> --yes`, `replication delete --all --yes`, `shard update --all --yes`).
 
 ## Command Groups
 
@@ -90,19 +90,20 @@ weaviate-cli [--env-file .env] status
 | `status` | *(top-level)* | Live readiness, version, RBAC identity, collections/nodes summary, enabled vectorizers/modules, `/v1/mcp` probe |
 | `guide` | *(top-level)* | Compact Markdown guide or `--schema` JSON command tree |
 | `config` | `show` | Offline inspection of resolved target URL, gRPC endpoint, precedence source, and redacted auth |
-| `mcp` | `config` | Generate Streamable HTTP `/v1/mcp` config (`generic`, `claude-code`, `cursor`, `vscode`) with optional `--check` |
+| `mcp` | `config` | Generate Streamable HTTP `/v1/mcp` config (`generic`, `claude-code`, `claude-desktop`, `cursor`, `vscode`) with optional `--check` |
 | `local` | `start`, `template`, `stop`, `status`, `logs`, `destroy` | Managed local Docker Compose cluster (`weaviate-cli-local`) |
 | `cloud` | `install-wcloud`, `login`, `whoami`, `logout`, `regions`, `create`, `list`, `get`, `status` | Weaviate Cloud lifecycle delegated to `wcloud` |
-| `collection` | `create`, `list`, `get`, `update`, `delete` | Declarative JSON collection DDL and config updates |
+| `collection` | `create`, `list`, `get`, `add-property`, `add-vector`, `delete-vector`, `delete-property-index`, `update`, `delete` | Declarative JSON collection DDL, schema evolution, and config updates |
 | `tenant` | `create`, `list`, `get`, `update`, `delete` | Multi-tenant lifecycle (`hot`/`active`, `cold`/`inactive`, `frozen`/`offloaded`) |
 | `alias` | `create`, `list`, `get`, `update`, `delete` | Zero-downtime collection alias management |
-| `node` | `list` | Cluster node health, versions, shards, and collections |
+| `node` | `list`, `stats` | Cluster node health, versions, shards (queue length, compression), and Raft consensus statistics |
 | `shard` | `list`, `update`, `state` | Shard health, status transitions (`READY`/`READONLY`), and sharding state |
 | `replication` | `create`, `list`, `get`, `cancel`, `delete` | Cross-node shard `COPY`/`MOVE` replication operations |
-| `backup` | `create`, `get`, `restore`, `cancel` | Cluster/collection backup and restore (`s3`, `gcs`, `filesystem`) |
+| `backup` | `list`, `create`, `get`, `restore`, `cancel` | Cluster/collection/RBAC backup and restore (`s3`, `gcs`, `azure`, `filesystem`) |
 | `export` | `create`, `get`, `cancel` | Collection Parquet export (`filesystem`, `s3`, `gcs`, `azure`) |
-| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission` | RBAC role and permission administration |
-| `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management and API key rotation |
+| `role` | `create`, `list`, `get`, `delete`, `assign`, `revoke`, `add-permission`, `revoke-permission`, `check-permission` | RBAC role and permission administration (users & OIDC groups) |
+| `user` | `create`, `list`, `get`, `update`, `delete` | Dynamic DB user management, API key rotation/revocation, and audit metadata |
+| `group` | `list`, `get`, `assign-role`, `revoke-role` | OIDC group RBAC role assignments |
 
 ## Core Workflows
 
@@ -154,14 +155,19 @@ weaviate-cli --env-file .env.cloud mcp config --client claude-code --check
 ```bash
 weaviate-cli collection list
 weaviate-cli collection get Articles
+weaviate-cli collection add-property Articles --name tags --data-type "text[]"
+weaviate-cli collection add-vector Articles title_vec --quantizer rq --rq-bits 8
 weaviate-cli collection update Articles --description "Knowledge base"
-weaviate-cli collection delete Articles
+weaviate-cli collection update Articles --from-json '{"invertedIndexConfig": {"bm25": {"b": 0.7}}}'
+weaviate-cli collection delete-vector Articles title_vec --yes
+weaviate-cli collection delete Articles --yes
 
 # Tenants require explicit names (states: hot/active, cold/inactive, frozen/offloaded)
 weaviate-cli tenant create tenant-a tenant-b --collection Articles --state active
-weaviate-cli tenant list --collection Articles
+weaviate-cli tenant list --collection Articles --state active --prefix tenant- --limit 50
+weaviate-cli tenant get tenant-a tenant-b --collection Articles
 weaviate-cli tenant update tenant-b --collection Articles --state frozen
-weaviate-cli tenant delete tenant-b --collection Articles
+weaviate-cli tenant delete tenant-b --collection Articles --yes
 
 # Zero-downtime alias switch
 weaviate-cli alias create Docs Articles_v1

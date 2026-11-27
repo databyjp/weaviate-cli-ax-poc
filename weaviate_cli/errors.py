@@ -99,6 +99,16 @@ def _connection_hint(target: str | None, config_source: str | None) -> str:
     )
 
 
+def _forbidden_hint(message: str, target: str | None) -> str:
+    is_cloud = bool(target and "weaviate.cloud" in target.lower())
+    if is_cloud and "backup" in message.lower():
+        return (
+            "Manual backups are unavailable on Weaviate Cloud free-tier clusters and "
+            "require manage_backups/read_backups RBAC permissions on supported tiers."
+        )
+    return "Use an API key or role with sufficient RBAC permissions for this command."
+
+
 def _classify_exception_inner(
     exc: Exception,
     *,
@@ -133,11 +143,12 @@ def _classify_exception_inner(
         )
 
     if isinstance(exc, (InsufficientPermissionsError, MissingScopeError)):
+        msg = str(exc) or "Insufficient permissions for this operation."
         return CLIError(
             code="FORBIDDEN",
-            message=str(exc) or "Insufficient permissions for this operation.",
+            message=msg,
             exit_code=ExitCode.AUTH,
-            hint="Use an API key or role with sufficient RBAC permissions for this command.",
+            hint=_forbidden_hint(msg, target),
         )
 
     if isinstance(
@@ -173,7 +184,7 @@ def _classify_exception_inner(
                 code="FORBIDDEN",
                 message=message,
                 exit_code=ExitCode.AUTH,
-                hint="Check that your API key has RBAC permission for this operation.",
+                hint=_forbidden_hint(message, target),
             )
         if status_code == 404:
             return CLIError(
@@ -193,6 +204,22 @@ def _classify_exception_inner(
                 message=message,
                 exit_code=ExitCode.USAGE,
                 hint="Inspect the server message above and verify your input or schema JSON.",
+            )
+        if status_code == 429:
+            is_usage_limit = "usage_limit_exceeded" in message.lower()
+            hint = (
+                "Weaviate Cloud tier limit reached (free tier allows 1 collection, "
+                "3 tenants/collection, and 100,000 objects). Delete an unused collection "
+                "or upgrade your cluster tier at https://console.weaviate.cloud."
+                if is_usage_limit
+                else "Request was rate-limited or exceeded a server quota. Retry after backing off or check cluster limits."
+            )
+            return CLIError(
+                code="USAGE_LIMIT_EXCEEDED" if is_usage_limit else "RATE_LIMITED",
+                message=message,
+                exit_code=ExitCode.RUNTIME,
+                hint=hint,
+                details={"status_code": 429},
             )
         return CLIError(
             code="SERVER_ERROR",

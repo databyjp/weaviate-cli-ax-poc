@@ -63,6 +63,33 @@ WCLOUD_INSTALL_HINT = (
     "or point WEAVIATE_WCLOUD_PATH to an existing binary."
 )
 
+FREE_TIER_LIMITS: dict[str, Any] = {
+    "max_collections": 1,
+    "max_tenants_per_collection": 3,
+    "max_objects": 100_000,
+    "vector_index": "hfresh",
+    "region": "eu-central-1",
+    "cloud_provider": "aws",
+    "backups": False,
+    "high_availability": False,
+    "max_free_clusters_per_user": 1,
+    "delete_or_wake": "console_only",
+    "console_url": "https://console.weaviate.cloud",
+}
+
+FREE_TIER_LIMITS_SUMMARY = (
+    "1 collection, 3 tenants/collection, 100,000 objects, hfresh vector index only, "
+    "no backups or HA, 1 free cluster/user; delete/wake at https://console.weaviate.cloud."
+)
+
+
+def _attach_tier_limits(cluster: dict[str, Any]) -> dict[str, Any]:
+    """Attach free-tier limits metadata when wcloud does not return structured limits."""
+    tier = str(cluster.get("tier") or "").strip().lower()
+    if tier == "free" and "limits" not in cluster and "tier_limits" not in cluster:
+        return {**cluster, "tier_limits": dict(FREE_TIER_LIMITS)}
+    return cluster
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -511,12 +538,19 @@ class CloudManager:
                 if raw_code
                 else "WCLOUD_ERROR"
             )
-            hint = (
-                "Run 'weaviate-cli cloud login' (or 'wcloud auth login') in an "
-                "interactive terminal with a browser."
-                if normalized_code == "WCLOUD_AUTH_REQUIRED"
-                else None
-            )
+            if normalized_code == "WCLOUD_AUTH_REQUIRED":
+                hint: str | None = (
+                    "Run 'weaviate-cli cloud login' (or 'wcloud auth login') in an "
+                    "interactive terminal with a browser."
+                )
+            elif normalized_code == "WCLOUD_QUOTA_EXCEEDED":
+                hint = (
+                    "Weaviate Cloud allows 1 free cluster per user across all "
+                    "organizations (including SUSPENDED clusters). Manage or delete "
+                    "existing clusters at https://console.weaviate.cloud."
+                )
+            else:
+                hint = None
             raise CLIError(
                 code=normalized_code,
                 message=message,
@@ -637,7 +671,7 @@ class CloudManager:
     ) -> tuple[dict[str, Any], list[str]]:
         warnings: list[str] = []
         url, grpc_url, api_key = extract_cluster_credentials(cluster)
-        enriched = dict(cluster)
+        enriched = _attach_tier_limits(dict(cluster))
         if url:
             enriched["url"] = url
         if grpc_url:
@@ -803,7 +837,11 @@ class CloudManager:
         self._ensure_authenticated(wcloud_bin)
         envelope = self._invoke_wcloud_json(wcloud_bin, ["cluster", "list"])
         clusters = envelope.get("data")
-        cluster_list = clusters if isinstance(clusters, list) else []
+        cluster_list = (
+            [_attach_tier_limits(c) if isinstance(c, dict) else c for c in clusters]
+            if isinstance(clusters, list)
+            else []
+        )
         return {"clusters": cluster_list, "count": len(cluster_list)}
 
     def get_cluster(

@@ -9,6 +9,7 @@ import click
 
 from weaviate_cli.errors import CLIError
 from weaviate_cli.managers.cloud_manager import (
+    FREE_TIER_LIMITS_SUMMARY,
     WCLOUD_VERSION,
     CloudManager,
     extract_cluster_credentials,
@@ -44,6 +45,8 @@ def _render_cluster_text(data: dict[str, Any]) -> None:
         click.echo(f"Status:   {data['status']}")
     if data.get("tier"):
         click.echo(f"Tier:     {data['tier']}")
+    if data.get("tier_limits") or str(data.get("tier") or "").lower() == "free":
+        click.echo(f"Limits:   {FREE_TIER_LIMITS_SUMMARY}")
     if data.get("region"):
         click.echo(f"Region:   {data['region']}")
     url, grpc_url, api_key = extract_cluster_credentials(data)
@@ -409,7 +412,15 @@ def cloud_regions(
     default=None,
     help="Region ID from 'weaviate-cli cloud regions' (default: eu-central-1).",
 )
-@click.option("--tier", type=str, default=None, help="Cluster tier (default: free).")
+@click.option(
+    "--tier",
+    type=str,
+    default=None,
+    help=(
+        "Cluster tier (default: free — 1 collection, 3 tenants/collection, "
+        "100k objects, hfresh only, no backups)."
+    ),
+)
 @click.option(
     "--include-key",
     is_flag=True,

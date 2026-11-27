@@ -50,7 +50,7 @@ class ExportManager:
 
     def create_export(
         self,
-        export_id: str = CreateExportCollectionDefaults.export_id,
+        export_id: str | None = CreateExportCollectionDefaults.export_id,
         backend: str = CreateExportCollectionDefaults.backend,
         file_format: str = CreateExportCollectionDefaults.file_format,
         include: str | None = CreateExportCollectionDefaults.include,
@@ -58,6 +58,8 @@ class ExportManager:
         wait: bool = CreateExportCollectionDefaults.wait,
         json_output: bool = False,
     ) -> None:
+        if not export_id:
+            raise click.ClickException("Export ID is required.")
         if include and exclude:
             raise click.ClickException(
                 "Cannot specify both --include and --exclude. Use one or the other."
@@ -112,10 +114,12 @@ class ExportManager:
 
     def get_export_status(
         self,
-        export_id: str = GetExportCollectionDefaults.export_id,
+        export_id: str | None = GetExportCollectionDefaults.export_id,
         backend: str = GetExportCollectionDefaults.backend,
         json_output: bool = False,
     ) -> None:
+        if not export_id:
+            raise click.ClickException("Export ID is required.")
         backend_enum = _resolve_backend(backend)
 
         result = self.client.export.get_status(
@@ -127,10 +131,12 @@ class ExportManager:
 
     def cancel_export(
         self,
-        export_id: str = CancelExportCollectionDefaults.export_id,
+        export_id: str | None = CancelExportCollectionDefaults.export_id,
         backend: str = CancelExportCollectionDefaults.backend,
         json_output: bool = False,
     ) -> None:
+        if not export_id:
+            raise click.ClickException("Export ID is required.")
         backend_enum = _resolve_backend(backend)
 
         success = self.client.export.cancel(

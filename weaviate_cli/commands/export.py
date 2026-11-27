@@ -27,7 +27,7 @@ def export_group() -> None:
 
 
 @export_group.command("create", context_settings=DEFAULT_CONTEXT_SETTINGS)
-@click.argument("export_id", default=CreateExportCollectionDefaults.export_id)
+@click.argument("export_id")
 @click.option(
     "--backend",
     default=CreateExportCollectionDefaults.backend,
@@ -101,7 +101,7 @@ def create_export_cli(
 
 
 @export_group.command("get", context_settings=DEFAULT_CONTEXT_SETTINGS)
-@click.argument("export_id", default=GetExportCollectionDefaults.export_id)
+@click.argument("export_id")
 @click.option(
     "--backend",
     default=GetExportCollectionDefaults.backend,
@@ -145,7 +145,7 @@ def get_export_cli(
 
 
 @export_group.command("cancel", context_settings=DEFAULT_CONTEXT_SETTINGS)
-@click.argument("export_id", default=CancelExportCollectionDefaults.export_id)
+@click.argument("export_id")
 @click.option(
     "--backend",
     default=CancelExportCollectionDefaults.backend,

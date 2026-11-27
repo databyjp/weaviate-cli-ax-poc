@@ -21,10 +21,20 @@ from weaviate_cli.utils import get_client_from_context
 
 @click.group("node", cls=AXGroup)
 def node_group() -> None:
-    """Inspect Weaviate cluster nodes."""
+    """Inspect Weaviate cluster nodes and Raft consensus statistics."""
 
 
-@node_group.command("list", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@node_group.command(
+    "list",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli node list --minimal\n"
+        "  weaviate-cli node list --shards\n"
+        "  weaviate-cli node list --collection Articles --shard shard-1"
+    ),
+)
 @click.option(
     "--minimal",
     is_flag=True,
@@ -33,7 +43,7 @@ def node_group() -> None:
 @click.option(
     "--shards",
     is_flag=True,
-    help="Show per-shard node information.",
+    help="Show per-shard node information (including async vector queue length and compression).",
 )
 @click.option(
     "--collections",
@@ -45,6 +55,12 @@ def node_group() -> None:
     default=GetNodesDefaults.collection,
     help="Filter shard details to a specific collection.",
     shell_complete=collection_name_complete,
+)
+@click.option(
+    "--shard",
+    default=None,
+    type=str,
+    help="Filter shard details to a specific shard name (may be combined with --collection).",
 )
 @click.option(
     "--json/--no-json",
@@ -59,6 +75,7 @@ def list_nodes_cli(
     shards: bool,
     collections: bool,
     collection: str | None,
+    shard: str | None,
     json_output: bool | None,
 ) -> None:
     """List cluster nodes and their status."""
@@ -66,6 +83,12 @@ def list_nodes_cli(
     command = "node list"
     client: WeaviateClient | None = None
     try:
+        if shard and (minimal or collections):
+            raise CLIError(
+                code="CONFLICTING_OPTIONS",
+                message="--shard cannot be combined with --minimal or --collections.",
+                exit_code=ExitCode.USAGE,
+            )
         if sum([bool(collection), shards, collections, minimal]) > 1:
             raise CLIError(
                 code="CONFLICTING_OPTIONS",
@@ -82,8 +105,46 @@ def list_nodes_cli(
                 shards=shards,
                 collections=collections,
                 collection=collection,
+                shard=shard,
                 json_output=as_json,
             ),
+        )
+    except Exception as exc:
+        handle_command_error(ctx, runtime, exc, command=command)
+    finally:
+        if client is not None:
+            client.close()
+
+
+@node_group.command(
+    "stats",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\nExamples:\n  weaviate-cli node stats\n  weaviate-cli node stats --no-json"
+    ),
+)
+@click.option(
+    "--json/--no-json",
+    "json_output",
+    default=None,
+    help="Output JSON envelope (auto-enabled when stdout is not a TTY).",
+)
+@click.pass_context
+def node_stats_cli(
+    ctx: click.Context,
+    json_output: bool | None,
+) -> None:
+    """Show Raft consensus and cluster synchronization statistics (/v1/cluster/statistics)."""
+    runtime = get_runtime(ctx, json_override=json_output)
+    command = "node stats"
+    client: WeaviateClient | None = None
+    try:
+        client = get_client_from_context(ctx)
+        node_man = NodeManager(client)
+        emit_captured_json_or_text(
+            runtime,
+            command=command,
+            invoke=lambda as_json: node_man.get_cluster_statistics(json_output=as_json),
         )
     except Exception as exc:
         handle_command_error(ctx, runtime, exc, command=command)

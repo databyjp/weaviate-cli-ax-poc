@@ -516,3 +516,35 @@ def test_print_replications_json_empty(capsys) -> None:
     data = json.loads(captured.out)
 
     assert data == {"replications": []}
+
+
+def test_query_replications_combinable_filters_and_wait(
+    cluster_manager: ClusterManager, mock_client: MagicMock
+) -> None:
+    from weaviate_cli.managers.local_manager import render_template_compose_yaml
+
+    op_pending = _make_rep(uuid="op-1", state_value="HYDRATING")
+    op_ready = _make_rep(uuid="op-1", state_value="READY")
+    mock_client.cluster.replications.query.return_value = [op_ready]
+    mock_client.cluster.replications.get.side_effect = [op_pending, op_ready]
+
+    ops = cluster_manager.query_replications(
+        collection="Articles", target_node="node1", include_history=True
+    )
+    assert len(ops) == 1
+    mock_client.cluster.replications.query.assert_called_once_with(
+        include_history=True, collection="Articles", target_node="node1"
+    )
+
+    clock = iter([0.0, 1.0, 2.0])
+    final = cluster_manager.wait_for_replication(
+        "op-1",
+        timeout=30.0,
+        sleep_fn=lambda _: None,
+        monotonic_fn=lambda: next(clock),
+    )
+    assert final.status.state.value == "READY"
+
+    template_yaml = render_template_compose_yaml()
+    assert "RUNTIME_OVERRIDES_ENABLED" in template_yaml
+    assert "RUNTIME_OVERRIDES_PATH" in template_yaml

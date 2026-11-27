@@ -110,6 +110,21 @@ def test_parse_permission_data():
         collection="Movies", create=True, read=True, update=True, delete=True
     )
 
+    # Test tenant-scoped data permissions
+    assert parse_permission("read_data:Movies:tenant-a") == Permissions.data(
+        collection="Movies", tenant="tenant-a", read=True
+    )
+    assert parse_permission(
+        "crud_data:Movies,Books:tenant-a,tenant-b"
+    ) == Permissions.data(
+        collection=["Movies", "Books"],
+        tenant=["tenant-a", "tenant-b"],
+        create=True,
+        read=True,
+        update=True,
+        delete=True,
+    )
+
 
 def test_parse_permission_roles():
     # Test basic role permissions
@@ -220,12 +235,78 @@ def test_parse_permission_backups():
         collection=["Movies", "Books", "Films"], manage=True
     )
 
+    # Test read_backups
+    assert parse_permission("read_backups") == Permissions.backup(
+        collection="*", read=True
+    )
+    assert parse_permission("read_backups:Movies,Books") == Permissions.backup(
+        collection=["Movies", "Books"], read=True
+    )
 
-def test_parse_permission_nodes():
-    # Test basic node permissions
+
+def test_parse_permission_mcp():
+    assert parse_permission("read_mcp") == Permissions.mcp(read=True)
+    assert parse_permission("create_mcp") == Permissions.mcp(create=True)
+    assert parse_permission("update_mcp") == Permissions.mcp(update=True)
+    assert parse_permission("cru_mcp") == Permissions.mcp(
+        create=True, read=True, update=True
+    )
+    assert parse_permission("cr_mcp") == Permissions.mcp(create=True, read=True)
+
+
+def test_parse_permission_replicate():
+    assert parse_permission("read_replicate") == Permissions.replicate(
+        collection="*", shard="*", read=True
+    )
+    assert parse_permission("crud_replicate:Articles") == Permissions.replicate(
+        collection="Articles",
+        shard="*",
+        create=True,
+        read=True,
+        update=True,
+        delete=True,
+    )
+    assert parse_permission(
+        "cr_replicate:Articles,Books:shard-1,shard-2"
+    ) == Permissions.replicate(
+        collection=["Articles", "Books"],
+        shard=["shard-1", "shard-2"],
+        create=True,
+        read=True,
+    )
+
+
+def test_parse_permission_groups():
+    assert parse_permission("read_groups") == Permissions.Groups.oidc(
+        group="*", read=True
+    )
+    assert parse_permission("read_groups:eng,ops") == Permissions.Groups.oidc(
+        group=["eng", "ops"], read=True
+    )
+    assert parse_permission("read_groups:eng:oidc") == Permissions.Groups.oidc(
+        group="eng", read=True
+    )
+    assert parse_permission("assign_and_revoke_groups:eng") == Permissions.Groups.oidc(
+        group="eng", assign_and_revoke=True
+    )
+
+
+def test_parse_permission_nodes(capsys):
+    # Test basic node permissions (must not emit spurious warning)
     assert parse_permission("read_nodes:minimal") == Permissions.Nodes.minimal(
         read=True
     )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+    # Specifying collection with minimal verbosity warns strictly on stderr, never stdout
+    assert parse_permission("read_nodes:minimal:Movies") == Permissions.Nodes.minimal(
+        read=True
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Collection is not supported for minimal verbosity" in captured.err
 
     # Test verbose node permissions
     assert parse_permission("read_nodes:verbose:Movies") == Permissions.Nodes.verbose(
@@ -313,11 +394,23 @@ def test_parse_permission_invalid():
     with pytest.raises(ValueError, match="Invalid permission action: create_cluster"):
         parse_permission("create_cluster")
 
-    with pytest.raises(ValueError, match="Invalid permission action: read_backups"):
-        parse_permission("read_backups")
+    with pytest.raises(ValueError, match="Invalid permission action: delete_backups"):
+        parse_permission("delete_backups")
 
     with pytest.raises(ValueError, match="Invalid permission action: update_nodes"):
         parse_permission("update_nodes")
+
+    with pytest.raises(ValueError, match="MCP permissions do not accept a target"):
+        parse_permission("read_mcp:Articles")
+
+    with pytest.raises(ValueError, match="Invalid MCP permission action: crud_mcp"):
+        parse_permission("crud_mcp")
+
+    with pytest.raises(ValueError, match="Invalid MCP permission action: delete_mcp"):
+        parse_permission("delete_mcp")
+
+    with pytest.raises(ValueError, match="Unsupported group type 'ldap'"):
+        parse_permission("read_groups:eng:ldap")
 
 
 def test_parse_async_replication_config_none():

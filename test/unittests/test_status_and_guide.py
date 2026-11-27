@@ -178,6 +178,50 @@ def test_probe_mcp_endpoint_handles_200_404_403_and_error():
         }
 
 
+def test_probe_mcp_endpoint_inspects_tools_list_and_write_enabled():
+    init_resp = httpx.Response(
+        200,
+        json={"jsonrpc": "2.0", "id": 1, "result": {}},
+        headers={"Mcp-Session-Id": "sess-123"},
+    )
+    tools_rw = httpx.Response(
+        200,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "tools": [
+                    {"name": "weaviate-query-hybrid"},
+                    {"name": "weaviate-objects-upsert"},
+                ]
+            },
+        },
+    )
+    with patch(
+        "weaviate_cli.managers.status_manager.httpx.post",
+        side_effect=[init_resp, tools_rw],
+    ) as mock_post:
+        res_rw = probe_mcp_endpoint("https://demo.weaviate.cloud", "secret")
+    assert res_rw["available"] is True
+    assert res_rw["write_enabled"] is True
+    assert res_rw["tools"] == ["weaviate-objects-upsert", "weaviate-query-hybrid"]
+    assert mock_post.call_args_list[1].kwargs["headers"]["Mcp-Session-Id"] == "sess-123"
+
+    # SSE response with read-only tools (no weaviate-objects-upsert)
+    tools_ro = httpx.Response(
+        200,
+        text='event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"weaviate-query-hybrid"}]}}\n\n',
+        headers={"content-type": "text/event-stream"},
+    )
+    with patch(
+        "weaviate_cli.managers.status_manager.httpx.post",
+        side_effect=[init_resp, tools_ro],
+    ):
+        res_ro = probe_mcp_endpoint("http://localhost:8080")
+    assert res_ro["write_enabled"] is False
+    assert res_ro["tools"] == ["weaviate-query-hybrid"]
+
+
 def test_status_cli_json_and_text_modes(cli_runner: CliRunner):
     client = _mock_client(collections={})
     forbidden = InsufficientPermissionsError(

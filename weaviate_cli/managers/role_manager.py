@@ -179,6 +179,26 @@ class RoleManager:
                 f"Error revoking permission '{permission}' from role '{role_name}': {e}"
             ) from e
 
+    def has_permissions(self, permission: tuple[str, ...], role_name: str) -> bool:
+        """Check whether a role has all specified permissions."""
+        try:
+            rbac_permissions = []
+            for perm in permission:
+                parsed = parse_permission(perm)
+                if isinstance(parsed, list):
+                    rbac_permissions.extend(parsed)
+                else:
+                    rbac_permissions.append(parsed)
+            return bool(
+                self.client.roles.has_permissions(
+                    permissions=rbac_permissions, role=role_name
+                )
+            )
+        except Exception as e:
+            raise Exception(
+                f"Error checking permission '{permission}' on role '{role_name}': {e}"
+            ) from e
+
     @staticmethod
     def role_to_dict(role: Role) -> dict:
         """Convert a Role to a JSON-serializable dict."""
@@ -240,6 +260,7 @@ class RoleManager:
             role_data["permissions"]["data"] = [
                 {
                     "collection": str(p.collection),
+                    "tenant": str(p.tenant),
                     "actions": [a.value for a in p.actions],
                 }
                 for p in role.data_permissions
@@ -248,6 +269,7 @@ class RoleManager:
             role_data["permissions"]["replicate"] = [
                 {
                     "collection": str(p.collection),
+                    "shard": str(p.shard),
                     "actions": [a.value for a in p.actions],
                 }
                 for p in role.replicate_permissions
@@ -260,6 +282,20 @@ class RoleManager:
                     "actions": [a.value for a in p.actions],
                 }
                 for p in role.alias_permissions
+            ]
+        if getattr(role, "mcp_permissions", None):
+            role_data["permissions"]["mcp"] = [
+                {"actions": sorted(a.value for a in p.actions)}
+                for p in role.mcp_permissions
+            ]
+        if getattr(role, "groups_permissions", None):
+            role_data["permissions"]["groups"] = [
+                {
+                    "group": str(p.group),
+                    "group_type": str(p.group_type),
+                    "actions": sorted(a.value for a in p.actions),
+                }
+                for p in role.groups_permissions
             ]
         return role_data
 
@@ -323,14 +359,14 @@ class RoleManager:
             print("\nData Permissions:")
             for perm in role.data_permissions:
                 print(
-                    f"  - Collection: {perm.collection}, Action: {', '.join([action.value for action in perm.actions])}"
+                    f"  - Collection: {perm.collection}, Tenant: {perm.tenant}, Action: {', '.join([action.value for action in perm.actions])}"
                 )
 
         if role.replicate_permissions:
             print("\nReplicate Permissions:")
             for perm in role.replicate_permissions:
                 print(
-                    f"  - Collection: {perm.collection}, Action: {', '.join([action.value for action in perm.actions])}"
+                    f"  - Collection: {perm.collection}, Shard: {perm.shard}, Action: {', '.join([action.value for action in perm.actions])}"
                 )
 
         if role.alias_permissions:
@@ -338,4 +374,18 @@ class RoleManager:
             for perm in role.alias_permissions:
                 print(
                     f"  - Collection: {perm.collection}, Alias: {perm.alias}, Action: {', '.join([action.value for action in perm.actions])}"
+                )
+
+        if getattr(role, "mcp_permissions", None):
+            print("\nMCP Permissions:")
+            for perm in role.mcp_permissions:
+                print(
+                    f"  - Action: {', '.join(sorted(action.value for action in perm.actions))}"
+                )
+
+        if getattr(role, "groups_permissions", None):
+            print("\nGroups Permissions:")
+            for perm in role.groups_permissions:
+                print(
+                    f"  - Group: {perm.group} ({perm.group_type}), Action: {', '.join(sorted(action.value for action in perm.actions))}"
                 )

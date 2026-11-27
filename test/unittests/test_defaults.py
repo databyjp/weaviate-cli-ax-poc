@@ -82,10 +82,13 @@ def test_create_tenants_defaults(runner):
     mock_collection.config.get.return_value = mock_config
 
     mock_collection.tenants.get.return_value = {}
-    mock_collection.tenants.get_by_names.return_value = {
-        "tenant-a": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
-        "tenant-b": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
-    }
+    mock_collection.tenants.get_by_names.side_effect = [
+        {},
+        {
+            "tenant-a": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
+            "tenant-b": MagicMock(activity_status=TenantActivityStatus.ACTIVE),
+        },
+    ]
     ctx.obj["config"].get_client.return_value = mock_client
 
     missing_result = runner.invoke(create_tenants_cli, obj=ctx.obj)
@@ -112,10 +115,13 @@ def test_create_backup_defaults(runner):
     )
     ctx.obj["config"].get_client.return_value = mock_client
 
-    result = runner.invoke(create_backup_cli, obj=ctx.obj)
+    missing_result = runner.invoke(create_backup_cli, obj=ctx.obj)
+    assert missing_result.exit_code == 2
+
+    result = runner.invoke(create_backup_cli, ["bk-2026"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert CreateBackupDefaults.backend == "s3"
-    assert CreateBackupDefaults.backup_id == "test-backup"
+    assert CreateBackupDefaults.backup_id is None
     assert CreateBackupDefaults.include is None
     assert CreateBackupDefaults.exclude is None
     assert CreateBackupDefaults.wait is False
@@ -133,7 +139,13 @@ def test_delete_collection_defaults(runner):
     missing_result = runner.invoke(delete_collection_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(delete_collection_cli, ["TestCollection"], obj=ctx.obj)
+    # Deleting a collection requires --yes
+    unconfirmed = runner.invoke(delete_collection_cli, ["TestCollection"], obj=ctx.obj)
+    assert unconfirmed.exit_code == 2
+
+    result = runner.invoke(
+        delete_collection_cli, ["TestCollection", "--yes"], obj=ctx.obj
+    )
     assert result.exit_code == 0, result.output
     assert DeleteCollectionDefaults.collection is None
     assert DeleteCollectionDefaults.all is False
@@ -162,9 +174,16 @@ def test_delete_tenants_defaults(runner):
     missing_result = runner.invoke(delete_tenants_cli, obj=ctx.obj)
     assert missing_result.exit_code == 2
 
-    result = runner.invoke(
+    unconfirmed = runner.invoke(
         delete_tenants_cli,
         ["--collection", "TestCollection", "tenant-a"],
+        obj=ctx.obj,
+    )
+    assert unconfirmed.exit_code == 2
+
+    result = runner.invoke(
+        delete_tenants_cli,
+        ["--collection", "TestCollection", "tenant-a", "--yes"],
         obj=ctx.obj,
     )
     assert result.exit_code == 0, result.output
@@ -231,13 +250,16 @@ def test_restore_backup_defaults(runner):
     ctx.obj = {"config": MagicMock()}
     ctx.obj["config"].get_client = MagicMock()
 
-    guard_result = runner.invoke(restore_backup_cli, obj=ctx.obj)
+    missing_result = runner.invoke(restore_backup_cli, obj=ctx.obj)
+    assert missing_result.exit_code == 2
+
+    guard_result = runner.invoke(restore_backup_cli, ["bk-2026"], obj=ctx.obj)
     assert guard_result.exit_code == 2
 
-    result = runner.invoke(restore_backup_cli, ["--yes"], obj=ctx.obj)
+    result = runner.invoke(restore_backup_cli, ["bk-2026", "--yes"], obj=ctx.obj)
     assert result.exit_code == 0, result.output
     assert RestoreBackupDefaults.backend == "s3"
-    assert RestoreBackupDefaults.backup_id == "test-backup"
+    assert RestoreBackupDefaults.backup_id is None
     assert RestoreBackupDefaults.wait is False
     assert RestoreBackupDefaults.include is None
     assert RestoreBackupDefaults.exclude is None

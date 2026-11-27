@@ -89,13 +89,23 @@ def test_main_noun_verb_commands_registered():
             "get",
             "status",
         },
-        "collection": {"create", "list", "get", "update", "delete"},
+        "collection": {
+            "create",
+            "list",
+            "get",
+            "add-property",
+            "add-vector",
+            "delete-vector",
+            "delete-property-index",
+            "update",
+            "delete",
+        },
         "tenant": {"create", "list", "get", "update", "delete"},
         "alias": {"create", "list", "get", "update", "delete"},
-        "node": {"list"},
+        "node": {"list", "stats"},
         "shard": {"list", "update", "state"},
         "replication": {"create", "list", "get", "cancel", "delete"},
-        "backup": {"create", "get", "restore", "cancel"},
+        "backup": {"list", "create", "get", "restore", "cancel"},
         "export": {"create", "get", "cancel"},
         "role": {
             "create",
@@ -106,8 +116,10 @@ def test_main_noun_verb_commands_registered():
             "revoke",
             "add-permission",
             "revoke-permission",
+            "check-permission",
         },
         "user": {"create", "list", "get", "update", "delete"},
+        "group": {"list", "get", "assign-role", "revoke-role"},
     }
     expected_top_commands = {"status", "guide"}
     assert (
@@ -332,15 +344,49 @@ def test_collection_delete_all_requires_yes(cli_runner):
     mock_config.get_client.return_value = mock_client
 
     with patch("cli.ConfigManager", return_value=mock_config):
+        blocked_single = cli_runner.invoke(main, ["collection", "delete", "A"])
+        assert blocked_single.exit_code == 2
+        assert (
+            json.loads(blocked_single.stdout)["error"]["code"]
+            == "CONFIRMATION_REQUIRED"
+        )
+        mock_client.collections.delete.assert_not_called()
+
+        allowed_single = cli_runner.invoke(main, ["collection", "delete", "A", "--yes"])
+        assert allowed_single.exit_code == 0, allowed_single.stdout
+        assert json.loads(allowed_single.stdout)["data"] == {
+            "deleted": ["A"],
+            "count": 1,
+        }
+
         blocked = cli_runner.invoke(main, ["collection", "delete", "--all"])
         assert blocked.exit_code == 2
         payload = json.loads(blocked.stdout)
         assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
-        mock_client.collections.delete.assert_not_called()
 
         allowed = cli_runner.invoke(main, ["collection", "delete", "--all", "--yes"])
         assert allowed.exit_code == 0, allowed.stdout
         assert json.loads(allowed.stdout)["data"] == {"deleted": ["A", "B"], "count": 2}
+
+
+def test_guide_role_does_not_repeat_full_permission_help(cli_runner):
+    result = cli_runner.invoke(main, ["guide", "role"])
+    assert result.exit_code == 0
+    assert result.stdout.count("Available Permissions:") == 1
+
+
+def test_rbac001_user_warning_is_filtered():
+    import warnings
+
+    from weaviate.warnings import _Warnings
+
+    from cli import configure_warning_filters
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        configure_warning_filters()
+        _Warnings.unknown_permission_encountered({"action": "manage_namespaces"})
+    assert caught == []
 
 
 def test_collection_list_connection_error_exit_code_5(cli_runner):
@@ -409,3 +455,188 @@ def test_tenant_commands_require_explicit_names(cli_runner):
             ).exit_code
             == 2
         )
+
+
+def test_collection_schema_evolution_cli_commands(cli_runner):
+    mock_client = MagicMock()
+    mock_client.collections.exists.return_value = True
+    mock_client.get_meta.return_value = {
+        "version": "1.41.0",
+        "modules": {"text2vec-transformers": {}, "generative-openai": {}},
+    }
+    mock_col = MagicMock()
+    mock_col.config.get.return_value = MagicMock(
+        properties=[],
+        references=[],
+        vector_config={},
+        vectorizer=None,
+        vector_index_type=MagicMock(value="hnsw"),
+    )
+    mock_client.collections.get.return_value = mock_col
+    mock_config = MagicMock()
+    mock_config.get_client.return_value = mock_client
+
+    with patch("cli.ConfigManager", return_value=mock_config):
+        res_prop = cli_runner.invoke(
+            main,
+            [
+                "collection",
+                "add-property",
+                "Articles",
+                "--name",
+                "tags",
+                "--data-type",
+                "text[]",
+                "--description",
+                "Topic tags",
+            ],
+        )
+        assert res_prop.exit_code == 0, res_prop.stdout + res_prop.stderr
+        prop_payload = json.loads(res_prop.stdout)
+        assert prop_payload["data"]["property"] == "tags"
+        assert prop_payload["data"]["kind"] == "property"
+        assert prop_payload["data"]["added"] is True
+
+        res_ref = cli_runner.invoke(
+            main,
+            [
+                "collection",
+                "add-property",
+                "Articles",
+                "--name",
+                "related",
+                "--data-type",
+                "Author",
+                "--data-type",
+                "Publisher",
+            ],
+        )
+        assert res_ref.exit_code == 0, res_ref.stdout + res_ref.stderr
+        assert json.loads(res_ref.stdout)["data"]["kind"] == "reference"
+
+        res_vec = cli_runner.invoke(
+            main,
+            [
+                "collection",
+                "add-vector",
+                "Articles",
+                "title_vec",
+                "--vectorizer",
+                "text2vec-transformers",
+                "--source-property",
+                "title",
+                "--quantizer",
+                "rq",
+                "--rq-bits",
+                "8",
+            ],
+        )
+        assert res_vec.exit_code == 0, res_vec.stdout + res_vec.stderr
+        assert json.loads(res_vec.stdout)["data"]["added"] == ["title_vec"]
+
+        res_del_vec = cli_runner.invoke(
+            main,
+            ["collection", "delete-vector", "Articles", "title_vec", "--yes"],
+        )
+        assert res_del_vec.exit_code == 0, res_del_vec.stdout + res_del_vec.stderr
+        del_payload = json.loads(res_del_vec.stdout)
+        assert del_payload["data"]["vector"] == "title_vec"
+        assert del_payload["data"]["async"] is True
+        mock_col.config.delete_vector_index.assert_called_once_with("title_vec")
+
+        res_upd_dry = cli_runner.invoke(
+            main,
+            [
+                "collection",
+                "update",
+                "Articles",
+                "--from-json",
+                '{"invertedIndexConfig": {"bm25": {"b": 0.7}}, "propertyDescriptions": {"title": "Doc title"}}',
+                "--dry-run",
+            ],
+        )
+        assert res_upd_dry.exit_code == 0, res_upd_dry.stdout + res_upd_dry.stderr
+        assert json.loads(res_upd_dry.stdout)["data"]["dry_run"] is True
+
+        res_upd = cli_runner.invoke(
+            main,
+            [
+                "collection",
+                "update",
+                "Articles",
+                "--from-json",
+                '{"description": "Updated", "generativeConfig": {"generative-openai": {"model": "gpt-4o"}}}',
+            ],
+        )
+        assert res_upd.exit_code == 0, res_upd.stdout + res_upd.stderr
+        assert json.loads(res_upd.stdout)["data"]["updated_fields"] == [
+            "description",
+            "generativeConfig",
+        ]
+
+
+def test_tenant_list_filters_multi_get_and_delete_yes_cli(cli_runner):
+    from weaviate.collections.classes.tenants import Tenant, TenantActivityStatus
+
+    mock_client = MagicMock()
+    mock_client.collections.exists.return_value = True
+    mock_col = MagicMock()
+    mock_col.name = "Docs"
+    mock_col.config.get.return_value = MagicMock(
+        multi_tenancy_config=MagicMock(enabled=True)
+    )
+    mock_col.tenants.get.return_value = {
+        "acme-1": Tenant(name="acme-1", activity_status=TenantActivityStatus.ACTIVE),
+        "acme-2": Tenant(
+            name="acme-2", activity_status=TenantActivityStatus.OFFLOADING
+        ),
+        "beta-1": Tenant(name="beta-1", activity_status=TenantActivityStatus.ONLOADING),
+    }
+    mock_col.tenants.get_by_names.side_effect = [
+        {"acme-1": Tenant(name="acme-1", activity_status=TenantActivityStatus.ACTIVE)},
+        {"acme-1": Tenant(name="acme-1", activity_status=TenantActivityStatus.ACTIVE)},
+        {},
+    ]
+    mock_client.collections.get.return_value = mock_col
+    mock_config = MagicMock()
+    mock_config.get_client.return_value = mock_client
+
+    with patch("cli.ConfigManager", return_value=mock_config):
+        res_list = cli_runner.invoke(
+            main,
+            [
+                "tenant",
+                "list",
+                "--collection",
+                "Docs",
+                "--prefix",
+                "acme-",
+                "--state",
+                "offloading",
+                "--limit",
+                "1",
+            ],
+        )
+        assert res_list.exit_code == 0, res_list.stdout + res_list.stderr
+        list_payload = json.loads(res_list.stdout)
+        assert list_payload["data"]["tenants"] == [
+            {"name": "acme-2", "activity_status": "OFFLOADING"}
+        ]
+        assert list_payload["data"]["summary"]["offloading"] == 1
+        assert list_payload["data"]["summary"]["total_unfiltered"] == 3
+
+        res_get = cli_runner.invoke(
+            main,
+            ["tenant", "get", "acme-1", "missing-1", "--collection", "Docs"],
+        )
+        assert res_get.exit_code == 0, res_get.stdout + res_get.stderr
+        get_payload = json.loads(res_get.stdout)
+        assert [t["name"] for t in get_payload["data"]["tenants"]] == ["acme-1"]
+        assert get_payload["data"]["missing"] == ["missing-1"]
+
+        res_del = cli_runner.invoke(
+            main,
+            ["tenant", "delete", "acme-1", "--collection", "Docs", "--yes"],
+        )
+        assert res_del.exit_code == 0, res_del.stdout + res_del.stderr
+        assert json.loads(res_del.stdout)["data"]["tenants_deleted"] == 1

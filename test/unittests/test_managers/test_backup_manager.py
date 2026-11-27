@@ -586,3 +586,106 @@ def test_cancel_backup_returns_false_raises(
 
     assert "my-backup" in str(exc_info.value)
     assert "could not be cancelled" in str(exc_info.value)
+
+
+def test_list_backups_json_and_text(
+    backup_manager: BackupManager, mock_client_with_backup: MagicMock, capsys
+) -> None:
+    from types import SimpleNamespace
+
+    mock_client_with_backup.backup.list_backups.return_value = [
+        SimpleNamespace(
+            backup_id="bk-1",
+            status=MagicMock(value="SUCCESS"),
+            collections=["Articles"],
+            started_at="2026-11-27T10:00:00Z",
+            completed_at="2026-11-27T10:01:00Z",
+            size=0.125,
+            incremental_base_backup_id=None,
+        )
+    ]
+
+    rows = backup_manager.list_backups(backend="azure", sort_asc=True, json_output=True)
+    assert len(rows) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["backend"] == "azure"
+    assert out["total"] == 1
+    assert out["backups"][0]["backup_id"] == "bk-1"
+    mock_client_with_backup.backup.list_backups.assert_called_once()
+
+    backup_manager.list_backups(backend="azure", json_output=False)
+    text = capsys.readouterr().out
+    assert "bk-1" in text
+    assert "Total: 1 backup(s)" in text
+
+
+def test_create_backup_compression_location_and_rbac(
+    backup_manager: BackupManager, mock_client_with_backup: MagicMock
+) -> None:
+    from weaviate.backup.backup import BackupCompressionLevel, BackupStorage
+
+    backup_manager.create_backup(
+        backup_id="bk-full",
+        backend="azure",
+        compression_level="zstd-default",
+        bucket="my-container",
+        path="prod/2026",
+        include_roles="Admin,Reader",
+        include_users="alice,bob",
+    )
+
+    kwargs = mock_client_with_backup.backup.create.call_args.kwargs
+    assert kwargs["backend"] == BackupStorage.AZURE
+    assert kwargs["config"].CompressionLevel == BackupCompressionLevel.ZSTD_DEFAULT
+    assert kwargs["backup_location"].bucket == "my-container"
+    assert kwargs["backup_location"].path == "prod/2026"
+    assert kwargs["include_roles"] == ["Admin", "Reader"]
+    assert kwargs["include_users"] == ["alice", "bob"]
+
+
+def test_restore_backup_rbac_cpu_and_location(
+    backup_manager: BackupManager, mock_client_with_backup: MagicMock
+) -> None:
+    backup_manager.restore_backup(
+        backup_id="bk-full",
+        backend="filesystem",
+        roles_restore="all",
+        users_restore="none",
+        cpu_for_restore=75,
+        path="/var/backups",
+    )
+    kwargs = mock_client_with_backup.backup.restore.call_args.kwargs
+    assert kwargs["roles_restore"] == "all"
+    assert kwargs["users_restore"] == "noRestore"
+    assert kwargs["config"].CPUPercentage == 75
+    assert kwargs["backup_location"].path == "/var/backups"
+
+
+def test_cancel_backup_restore_operation(
+    backup_manager: BackupManager, mock_client_with_backup: MagicMock, capsys
+) -> None:
+    mock_client_with_backup.backup.cancel.return_value = True
+    backup_manager.cancel_backup(
+        backend="azure", backup_id="bk-1", restore=True, json_output=True
+    )
+    kwargs = mock_client_with_backup.backup.cancel.call_args.kwargs
+    assert kwargs["operation"] == "restore"
+    data = json.loads(capsys.readouterr().out)
+    assert "Backup restore" in data["message"]
+
+
+def test_backup_location_validation(backup_manager: BackupManager) -> None:
+    from weaviate_cli.errors import CLIError, ExitCode
+
+    with pytest.raises(CLIError) as exc_fs:
+        backup_manager.create_backup(
+            backup_id="bk-1", backend="filesystem", bucket="bad", path="/tmp"
+        )
+    assert exc_fs.value.code == "INVALID_BACKUP_LOCATION"
+    assert exc_fs.value.exit_code == ExitCode.USAGE
+
+    with pytest.raises(CLIError) as exc_s3:
+        backup_manager.create_backup(
+            backup_id="bk-1", backend="s3", bucket="only-bucket"
+        )
+    assert exc_s3.value.code == "INVALID_BACKUP_LOCATION"

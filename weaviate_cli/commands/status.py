@@ -66,6 +66,9 @@ def _render_status_text(status: dict[str, Any]) -> None:
             if avail is False
             else "unknown"
         )
+        write_enabled = mcp.get("write_enabled")
+        if avail is True and isinstance(write_enabled, bool):
+            state += " (read+write)" if write_enabled else " (read-only)"
         click.echo(f"Native MCP:  {state} ({mcp.get('endpoint')})")
 
 

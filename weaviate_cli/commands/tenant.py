@@ -7,11 +7,13 @@ from weaviate import WeaviateClient
 
 from weaviate_cli.completion.complete import collection_name_complete
 from weaviate_cli.defaults import CreateTenantsDefaults
+from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.tenant_manager import TenantManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
     AXGroup,
     emit_captured_json_or_text,
+    emit_error,
     get_runtime,
     handle_command_error,
 )
@@ -92,12 +94,51 @@ def create_tenants_cli(
             client.close()
 
 
-@tenant_group.command("list", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@tenant_group.command(
+    "list",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli tenant list --collection Articles\n"
+        "  weaviate-cli tenant list --collection Articles --state offloaded --prefix acme- --limit 50"
+    ),
+)
 @click.option(
     "--collection",
     required=True,
     help="The name of the collection to list tenants from.",
     shell_complete=collection_name_complete,
+)
+@click.option(
+    "--state",
+    default=None,
+    type=click.Choice(
+        [
+            "hot",
+            "active",
+            "cold",
+            "inactive",
+            "frozen",
+            "offloaded",
+            "offloading",
+            "onloading",
+        ],
+        case_sensitive=False,
+    ),
+    help="Filter tenants by activity state (including transitional offloading/onloading).",
+)
+@click.option(
+    "--prefix",
+    default=None,
+    type=str,
+    help="Filter tenants whose name starts with PREFIX.",
+)
+@click.option(
+    "--limit",
+    default=None,
+    type=int,
+    help="Maximum number of tenants to return/display (counts still reflect all matching tenants).",
 )
 @click.option("--verbose", is_flag=True, help="Print each tenant name and status.")
 @click.option(
@@ -110,12 +151,25 @@ def create_tenants_cli(
 def list_tenants_cli(
     ctx: click.Context,
     collection: str,
+    state: str | None,
+    prefix: str | None,
+    limit: int | None,
     verbose: bool,
     json_output: bool | None,
 ) -> None:
-    """List tenants in a collection."""
+    """List tenants in a collection (with optional state/prefix/limit filtering)."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "tenant list"
+    if limit is not None and limit < 1:
+        emit_error(
+            runtime,
+            CLIError(
+                code="INVALID_LIMIT",
+                message="--limit must be a positive integer (>= 1).",
+                exit_code=ExitCode.USAGE,
+            ),
+            command=command,
+        )
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)
@@ -126,6 +180,9 @@ def list_tenants_cli(
             invoke=lambda as_json: tenant_manager.get_tenants(
                 collection=collection,
                 tenant_id=None,
+                state=state,
+                prefix=prefix,
+                limit=limit,
                 verbose=verbose,
                 json_output=as_json,
             ),
@@ -137,12 +194,21 @@ def list_tenants_cli(
             client.close()
 
 
-@tenant_group.command("get", context_settings=DEFAULT_CONTEXT_SETTINGS)
-@click.argument("name")
+@tenant_group.command(
+    "get",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli tenant get tenant-a --collection Articles\n"
+        "  weaviate-cli tenant get tenant-a tenant-b --collection Articles"
+    ),
+)
+@click.argument("tenants", nargs=-1, required=True)
 @click.option(
     "--collection",
     required=True,
-    help="The name of the collection containing the tenant.",
+    help="The name of the collection containing the tenant(s).",
     shell_complete=collection_name_complete,
 )
 @click.option("--verbose", is_flag=True, help="Print verbose output.")
@@ -155,12 +221,12 @@ def list_tenants_cli(
 @click.pass_context
 def get_tenant_cli(
     ctx: click.Context,
-    name: str,
+    tenants: tuple[str, ...],
     collection: str,
     verbose: bool,
     json_output: bool | None,
 ) -> None:
-    """Get details for a specific tenant in a collection."""
+    """Get details for one or more specific tenants in a collection."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "tenant get"
     client: WeaviateClient | None = None
@@ -172,7 +238,7 @@ def get_tenant_cli(
             command=command,
             invoke=lambda as_json: tenant_manager.get_tenants(
                 collection=collection,
-                tenant_id=name,
+                tenant_ids=list(tenants),
                 verbose=verbose,
                 json_output=as_json,
             ),
@@ -245,13 +311,29 @@ def update_tenants_cli(
             client.close()
 
 
-@tenant_group.command("delete", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@tenant_group.command(
+    "delete",
+    context_settings=DEFAULT_CONTEXT_SETTINGS,
+    epilog=(
+        "\b\n"
+        "Examples:\n"
+        "  weaviate-cli tenant delete tenant-b --collection Articles --yes\n"
+        "  weaviate-cli tenant delete tenant-a tenant-b --collection Articles --yes"
+    ),
+)
 @click.argument("tenants", nargs=-1, required=True)
 @click.option(
     "--collection",
     required=True,
     help="The name of the collection containing the tenants.",
     shell_complete=collection_name_complete,
+)
+@click.option(
+    "-y",
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm destructive tenant deletion (required).",
 )
 @click.option(
     "--json/--no-json",
@@ -264,11 +346,34 @@ def delete_tenants_cli(
     ctx: click.Context,
     tenants: tuple[str, ...],
     collection: str,
+    yes: bool,
     json_output: bool | None,
 ) -> None:
-    """Delete one or more named tenants from a collection."""
+    """Delete one or more named tenants from a collection (requires --yes)."""
     runtime = get_runtime(ctx, json_override=json_output)
     command = "tenant delete"
+
+    if not yes:
+        tenant_label = (
+            f"tenant '{tenants[0]}'"
+            if len(tenants) == 1
+            else f"{len(tenants)} tenants ({', '.join(tenants)})"
+        )
+        rerun_cmd = f"weaviate-cli tenant delete {' '.join(tenants)} --collection {collection} --yes"
+        emit_error(
+            runtime,
+            CLIError(
+                code="CONFIRMATION_REQUIRED",
+                message=(
+                    f"Deleting {tenant_label} from collection '{collection}' "
+                    "is destructive and requires --yes."
+                ),
+                exit_code=ExitCode.USAGE,
+                hint=f"Re-run with '{rerun_cmd}' after confirming.",
+            ),
+            command=command,
+        )
+
     client: WeaviateClient | None = None
     try:
         client = get_client_from_context(ctx)

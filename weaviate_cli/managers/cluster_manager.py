@@ -1,11 +1,17 @@
 import json
+import time
 from collections.abc import Callable
+from typing import Any
 
 import weaviate.classes.replication as wvcr
 import weaviate.outputs.cluster as wvoc
 import weaviate.outputs.replication as wvor
 from prettytable import PrettyTable
 from weaviate.client import WeaviateClient
+
+from weaviate_cli.errors import CLIError, ExitCode
+
+_TERMINAL_REPLICATION_STATES = {"READY", "CANCELLED", "FAILED", "ERROR"}
 
 
 class ClusterManager:
@@ -120,6 +126,66 @@ class ClusterManager:
             )
         except Exception as e:
             raise Exception(f"Error getting replications: {e}") from e
+
+    def query_replications(
+        self,
+        *,
+        collection: str | None = None,
+        shard: str | None = None,
+        target_node: str | None = None,
+        include_history: bool = False,
+    ):
+        """Query replications using any combination of collection, shard, and target_node filters."""
+        kwargs: dict[str, Any] = {"include_history": include_history}
+        if collection is not None:
+            kwargs["collection"] = collection
+        if shard is not None:
+            kwargs["shard"] = shard
+        if target_node is not None:
+            kwargs["target_node"] = target_node
+        try:
+            return self.client.cluster.replications.query(**kwargs)
+        except Exception as e:
+            raise Exception(f"Error querying replications: {e}") from e
+
+    def wait_for_replication(
+        self,
+        op_id: str,
+        *,
+        timeout: float = 300.0,
+        poll_interval: float = 1.0,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        monotonic_fn: Callable[[], float] = time.monotonic,
+    ) -> Any:
+        """Poll a replication operation until it reaches a terminal state."""
+        deadline = monotonic_fn() + timeout
+        while True:
+            op = self.get_replication(op_id=op_id, include_history=False)
+            if op is None:
+                raise CLIError(
+                    code="REPLICATION_NOT_FOUND",
+                    message=f"Replication operation '{op_id}' was not found while waiting.",
+                    exit_code=ExitCode.NOT_FOUND,
+                )
+            state = str(op.status.state.value).upper()
+            if state in _TERMINAL_REPLICATION_STATES:
+                if state != "READY":
+                    errors = list(op.status.errors) if op.status.errors else []
+                    detail = f" ({'; '.join(errors)})" if errors else ""
+                    raise CLIError(
+                        code="REPLICATION_FAILED",
+                        message=f"Replication '{op_id}' finished with status '{state}'{detail}.",
+                        exit_code=ExitCode.RUNTIME,
+                    )
+                return op
+            if monotonic_fn() >= deadline:
+                raise CLIError(
+                    code="REPLICATION_TIMEOUT",
+                    message=f"Timed out after {int(timeout)}s waiting for replication '{op_id}' (last state: {state}).",
+                    exit_code=ExitCode.RUNTIME,
+                    hint=f"Check progress with 'weaviate-cli replication get {op_id} --history'.",
+                )
+            sleep_fn(poll_interval)
 
     def print_replication(
         self, replication: wvor.ReplicateOperation, json_output: bool = False
