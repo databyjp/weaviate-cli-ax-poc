@@ -29,10 +29,12 @@ from weaviate_cli.commands.alias import alias_group
 from weaviate_cli.commands.backup import backup_group
 from weaviate_cli.commands.collection import collection_group
 from weaviate_cli.commands.export import export_group
+from weaviate_cli.commands.guide import guide_command
 from weaviate_cli.commands.node import node_group
 from weaviate_cli.commands.replication import replication_group
 from weaviate_cli.commands.role import role_group
 from weaviate_cli.commands.shard import shard_group
+from weaviate_cli.commands.status import status_command
 from weaviate_cli.commands.tenant import tenant_group
 from weaviate_cli.commands.user import user_group
 from weaviate_cli.errors import classify_exception
@@ -64,6 +66,7 @@ Output & exit codes:
   Structured JSON envelope (data/error/metadata) is enabled automatically when
   stdout is not a TTY; override with --json or --no-json.
   Exit codes: 0=ok, 1=runtime, 2=usage/validation, 3=auth/RBAC, 4=not-found/conflict, 5=connectivity.
+  Tip: run 'weaviate-cli status' to inspect connectivity/modules, or 'weaviate-cli guide' for a full reference.
 """
 
 
@@ -156,6 +159,8 @@ def main(
         emit_error(runtime, classify_exception(exc), command="weaviate-cli")
 
 
+main.add_command(status_command)
+main.add_command(guide_command)
 main.add_command(collection_group)
 main.add_command(tenant_group)
 main.add_command(alias_group)

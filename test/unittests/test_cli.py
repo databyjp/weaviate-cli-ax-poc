@@ -94,7 +94,10 @@ def test_main_noun_verb_commands_registered():
         },
         "user": {"create", "list", "get", "update", "delete"},
     }
-    assert set(main.commands.keys()) == set(expected_groups.keys())
+    expected_top_commands = {"status", "guide"}
+    assert (
+        set(main.commands.keys()) == set(expected_groups.keys()) | expected_top_commands
+    )
 
     for legacy in (
         "create",
@@ -114,6 +117,11 @@ def test_main_noun_verb_commands_registered():
         group = main.commands[group_name]
         assert isinstance(group, click.Group)
         assert set(group.commands.keys()) == expected_subs
+
+    for top_name in expected_top_commands:
+        cmd = main.commands[top_name]
+        assert isinstance(cmd, click.Command)
+        assert not isinstance(cmd, click.Group)
 
 
 def test_all_cli_options_are_kebab_case():

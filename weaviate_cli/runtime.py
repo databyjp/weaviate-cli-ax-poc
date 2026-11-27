@@ -10,7 +10,7 @@ from typing import Any, NoReturn
 
 import click
 
-from weaviate_cli.errors import CLIError, ExitCode
+from weaviate_cli.errors import CLIError, ExitCode, classify_exception
 
 HELP_OPTION_NAMES = ["-h", "--help"]
 DEFAULT_CONTEXT_SETTINGS: dict[str, Any] = {"help_option_names": HELP_OPTION_NAMES}
@@ -126,6 +126,29 @@ def emit_error(
     if error.hint:
         click.echo(f"Hint: {error.hint}", err=True)
     sys.exit(int(error.exit_code))
+
+
+def get_config_meta(ctx: click.Context | None) -> tuple[str | None, str | None]:
+    """Return (target_description, config_source) from Click context if present."""
+    config = (
+        ctx.obj.get("config") if ctx is not None and isinstance(ctx.obj, dict) else None
+    )
+    if config is None:
+        return None, None
+    return getattr(config, "target_description", None), getattr(config, "source", None)
+
+
+def handle_command_error(
+    ctx: click.Context | None,
+    runtime: RuntimeContext,
+    exc: Exception,
+    *,
+    command: str,
+) -> NoReturn:
+    """Classify any command exception with target context and emit a structured error."""
+    target, source = get_config_meta(ctx)
+    cli_err = classify_exception(exc, target=target, config_source=source)
+    emit_error(runtime, cli_err, command=command)
 
 
 def _infer_json_from_argv(args: Sequence[str] | None) -> bool:

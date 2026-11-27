@@ -4,6 +4,9 @@ modules
 check_weaviate_client_python_version.sh
 benchmark_results*
 .claude/settings.json
+.env
+.env.*
+!.env.example
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

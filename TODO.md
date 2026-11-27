@@ -33,11 +33,11 @@ Active checklist, command specifications, and dated progress log for the `weavia
 ### Harden AX contracts
 - [x] Shared AX runtime & `collection` vertical slice:
   - Added `weaviate_cli/errors.py`, `weaviate_cli/runtime.py`, and `weaviate_cli/specs/collection.py`.
-  - Enabled global `--url`, `--api-key`, `--grpc-url` + `WEAVIATE_URL`, `WEAVIATE_API_KEY`, `WEAVIATE_GRPC_URL` env var precedence in `ConfigManager` (and moved gRPC fallback warnings to `stderr`).
+  - Enabled global `--url`, `--api-key`, `--grpc-url`, `--env-file` + `WEAVIATE_URL`, `WEAVIATE_API_KEY`, `WEAVIATE_GRPC_URL` precedence in `ConfigManager` (pair-isolated `--env-file`, gRPC fallback warnings on `stderr`, and silenced `AuthlibDeprecationWarning` on CLI startup).
   - Added global `--json`/`--no-json` (auto-enabled when `!isatty()`) with `data`/`error`/`metadata` envelope, semantic exit codes (`0`..`5`), `-h`/`--help` with connection precedence and surface boundaries, and `collection delete --all --yes`.
   - Refactored `collection create` to JSON-only (`/v1/schema` via `--from-file <path|->` or `--from-json`, `--template`, `--dry-run`, `--check-cluster`, `--if-not-exists`) with pure client-side + live cluster module validation and strict rejection of top-level `"name"`.
+- [x] Add one-shot command/syntax discovery (`guide` Markdown + `guide --schema` machine-readable Click command introspection) and `status` diagnostics (readiness, version, identity, enabled vectorizers/modules, `/v1/mcp` probe, graceful RBAC fallback).
 - [ ] Roll out shared AX runtime (`stderr` routing, global `--json` envelope, semantic exit codes, `--yes` guards, `-h`/`--help` examples) to remaining command groups (`tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`).
-- [ ] Add one-shot command/syntax discovery (`guide` Markdown + machine-readable command schema introspection).
 
 ### Implement lifecycle, diagnostics, and surface glue
 - [ ] Implement `cloud` delegation to `wcloud`:
@@ -49,7 +49,7 @@ Active checklist, command specifications, and dated progress log for the `weavia
   - Verify whether `cr.weaviate.io/semitechnologies/transformers-inference:snowflake-snowflake-arctic-embed-m-v1.5-onnx` mirrors Docker Hub and supports `arm64`/`amd64` (fall back to Docker Hub image if not mirrored).
   - Launch single-node Weaviate + `text2vec-transformers` sidecar on a dedicated labeled Docker network with `/v1/mcp` enabled by default (`--no-mcp`), `ENABLE_API_BASED_MODULES=true`, optional `--rbac`, and `--vectorizer none` escape hatch.
   - Emit a `stderr` notice on first image pull and structured `DOCKER_UNAVAILABLE` / `PORT_IN_USE` errors when Docker or ports are unavailable.
-- [ ] Implement `status` (readiness/liveness, Weaviate version, node summary, enabled modules, `/v1/mcp` availability), `config` (`show` with redacted keys, `use`, `test`), `mcp config` (ready-to-use client snippet), and `guide` (compact Markdown self-documentation matching `wcloud guide`).
+- [ ] Implement `config` (`show` with redacted keys, `use`, `test`) and `mcp config` (ready-to-use client snippet). *(Done: `status` and `guide`.)*
 
 ### Update skills, docs, and evaluate agent DX/AX
 - [ ] Update `CLAUDE.md` conventions once the CLI implements the [stderr and exit-code contracts](#harden-ax-contracts), replacing the legacy `click.echo("Error: ...")` and `sys.exit(1)` guidance.
@@ -85,3 +85,7 @@ Active checklist, command specifications, and dated progress log for the `weavia
 - Configured GitHub Actions to run `make lint` and `make typecheck` before the test jobs on pull requests and pushes to `main`. Removed Black's dependency and configuration. Both checks passed locally; the release workflow was unchanged.
 - Migrated all existing admin and DDL commands to `noun-verb` groups (`collection`, `tenant`, `alias`, `node`, `shard`, `replication`, `backup`, `export`, `role`, `user`) with `kebab-case` flags and no legacy `verb-noun` aliases. Redesigned `collection create` with `--from-file`/`--from-json` (`create_from_dict`) and `--property name:type`, and required explicit tenant names across `tenant` commands.
 - Surveyed `weaviate-client`, `wcloud`, `kubectl`, `aws` CLI, `supabase/cli`, `mongodb-atlas-cli`, `neonctl`, and `pscale` for declarative schema creation and AX contracts, then implemented the shared AX foundation (`errors.py`, `runtime.py`, `ConfigManager` env/flag precedence) and refactored the `collection` group (`collection create` simplified to JSON-only with `--template`, `--dry-run`, `--check-cluster`, `--if-not-exists`, and pure `specs/collection.py` client-side + live module validation; `collection delete --all` guarded by `--yes`).
+
+### 2026.11.27
+- Ran isolated `claude -p` black-box eval traces (cluster inspect, collection lifecycle, validation recovery), fixed trace-discovered issues (rejecting `"vectorizer": "none"`/`vectorIndex*` with `"vectorConfig"`, 1-round `"name"` + `"type"` validation hints, and silencing `AuthlibDeprecationWarning` on startup), and added pair-isolated global `--env-file <path>`.
+- Implemented `weaviate-cli status` (target, readiness, version, RBAC-tolerant user/collections/nodes summary, enabled vectorizers/modules, and `/v1/mcp` probe) and `weaviate-cli guide` (compact Markdown + `--schema` live Click introspection), and added `.env` to `.gitignore`.

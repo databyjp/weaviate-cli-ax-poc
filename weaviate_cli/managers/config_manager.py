@@ -271,6 +271,35 @@ class ConfigManager:
             return f"localhost:{port}"
         return host
 
+    @property
+    def rest_base_url(self) -> str:
+        """Resolved HTTP(S) base URL for the target Weaviate instance (no trailing slash)."""
+        host = str(self.config.get("host", self.default_host)).rstrip("/")
+        if self.__is_url(host):
+            return host
+        if host.endswith("weaviate.cloud"):
+            return f"https://{host}"
+        http_port = int(self.config.get("http_port", self.default_port))
+        scheme = "https" if http_port == 443 else "http"
+        if (scheme == "https" and http_port == 443) or (
+            scheme == "http" and http_port == 80
+        ):
+            return f"{scheme}://{host}"
+        return f"{scheme}://{host}:{http_port}"
+
+    def get_api_key(self) -> str | None:
+        """Return the configured Bearer API key if auth is configured, else None."""
+        auth_section = self.config.get("auth")
+        if not isinstance(auth_section, dict):
+            return None
+        if auth_section.get("type") == "api_key":
+            val = auth_section.get("api_key")
+            return str(val) if val else None
+        if auth_section.get("type") == "user" and self.user:
+            val = auth_section.get(self.user)
+            return str(val) if val else None
+        return None
+
     def create_default_config(self) -> None:
         """Populate default localhost configuration."""
         self.config = {

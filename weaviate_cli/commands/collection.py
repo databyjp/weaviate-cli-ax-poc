@@ -13,15 +13,15 @@ from weaviate import WeaviateClient
 
 from weaviate_cli.completion.complete import collection_name_complete
 from weaviate_cli.defaults import UpdateCollectionDefaults
-from weaviate_cli.errors import CLIError, ExitCode, classify_exception
+from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
-    RuntimeContext,
     emit_error,
     emit_success,
     emit_warning,
     get_runtime,
+    handle_command_error,
 )
 from weaviate_cli.specs.collection import (
     get_collection_template,
@@ -33,25 +33,6 @@ from weaviate_cli.utils import (
     get_client_from_context,
     parse_async_replication_config,
 )
-
-
-def _config_meta(ctx: click.Context) -> tuple[str | None, str | None]:
-    config = ctx.obj.get("config") if isinstance(ctx.obj, dict) else None
-    if config is None:
-        return None, None
-    return getattr(config, "target_description", None), getattr(config, "source", None)
-
-
-def _handle_command_error(
-    ctx: click.Context,
-    runtime: RuntimeContext,
-    exc: Exception,
-    *,
-    command: str,
-) -> None:
-    target, source = _config_meta(ctx)
-    cli_err = classify_exception(exc, target=target, config_source=source)
-    emit_error(runtime, cli_err, command=command)
 
 
 def _read_schema_input(from_file: str | None, from_json: str | None) -> tuple[str, str]:
@@ -357,7 +338,7 @@ def create_collection_cli(
             text_renderer=_render_create_text,
         )
     except Exception as exc:
-        _handle_command_error(ctx, runtime, exc, command=command)
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
         if client is not None:
             client.close()
@@ -387,7 +368,7 @@ def list_collections_cli(ctx: click.Context, json_output: bool | None) -> None:
             text_renderer=lambda: _render_collections_table(rows),
         )
     except Exception as exc:
-        _handle_command_error(ctx, runtime, exc, command=command)
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
         if client is not None:
             client.close()
@@ -418,7 +399,7 @@ def get_collection_cli(ctx: click.Context, name: str, json_output: bool | None) 
             text_renderer=lambda: click.echo(json.dumps(config, indent=2)),
         )
     except Exception as exc:
-        _handle_command_error(ctx, runtime, exc, command=command)
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
         if client is not None:
             client.close()
@@ -580,7 +561,7 @@ def update_collection_cli(
             ),
         )
     except Exception as exc:
-        _handle_command_error(ctx, runtime, exc, command=command)
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
         if client is not None:
             client.close()
@@ -677,7 +658,7 @@ def delete_collection_cli(
             text_renderer=_render_delete_text,
         )
     except Exception as exc:
-        _handle_command_error(ctx, runtime, exc, command=command)
+        handle_command_error(ctx, runtime, exc, command=command)
     finally:
         if client is not None:
             client.close()
