@@ -1098,7 +1098,7 @@ def delete_property_index_cli(
         "  weaviate-cli collection update Articles --vector-name title_vec --vector-index hnsw_rq --rq-bits 8 --filter-strategy pathseer\n"
         "\n\b\n"
         "  # Declarative JSON patch (supports BM25/stopwords, named vectors, propertyDescriptions, generative/reranker)\n"
-        '  weaviate-cli collection update Articles --from-json \'{"invertedIndexConfig": {"bm25": {"b": 0.7, "k1": 1.4}}, "propertyDescriptions": {"body": "Main text"}}\'\n'
+        '  weaviate-cli collection update Articles --from-json \'{"invertedIndexConfig": {"bm25": {"b": 0.7}}, "vectorConfig": {"body_vec": {"vectorIndexConfig": {"filterStrategy": "pathseer"}}}}\'\n'
         "  weaviate-cli collection update Articles --from-file patch.json --dry-run"
     ),
 )

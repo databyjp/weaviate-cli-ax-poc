@@ -9,6 +9,20 @@ from weaviate.client import WeaviateClient
 
 from weaviate_cli.types.models import CollectionInfo, NodeInfo, ShardInfo
 
+_RAFT_SUFFRAGE_LABELS: dict[int, str] = {
+    0: "Voter",
+    1: "Nonvoter",
+    2: "Staging",
+}
+
+
+def _format_suffrage(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return _RAFT_SUFFRAGE_LABELS.get(value, str(value))
+    return value
+
 
 def _serialize_raft_stats(raft: Any) -> dict[str, Any] | None:
     if raft is None:
@@ -18,7 +32,7 @@ def _serialize_raft_stats(raft: Any) -> dict[str, Any] | None:
         {
             "node_id": getattr(m, "node_id", None),
             "address": getattr(m, "address", None),
-            "suffrage": getattr(m, "suffrage", None),
+            "suffrage": _format_suffrage(getattr(m, "suffrage", None)),
         }
         for m in latest_cfg
     ]

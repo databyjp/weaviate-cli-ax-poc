@@ -319,7 +319,7 @@ def test_get_cluster_statistics_json_and_text(mock_client, capsys):
                         SimpleNamespace(
                             node_id="weaviate-0",
                             address="10.0.0.1:8300",
-                            suffrage="Voter",
+                            suffrage=0,
                         )
                     ],
                     num_peers=0,
@@ -332,6 +332,7 @@ def test_get_cluster_statistics_json_and_text(mock_client, capsys):
     res = node_manager.get_cluster_statistics(json_output=True)
     assert res["synchronized"] is True
     assert res["nodes"][0]["raft"]["state"] == "Leader"
+    assert res["nodes"][0]["raft"]["latest_configuration"][0]["suffrage"] == "Voter"
     out_json = json.loads(capsys.readouterr().out)
     assert out_json["synchronized"] is True
     assert out_json["nodes"][0]["raft"]["applied_index"] == 120

@@ -62,6 +62,10 @@ from weaviate_cli.runtime import (
     resolve_json_output,
 )
 
+# Re-apply after imports because transitive dependencies (e.g. weaviate/google.protobuf)
+# insert a global ('default', Warning) filter at index 0 during import.
+configure_warning_filters()
+
 ROOT_HELP = """Weaviate CLI for cluster lifecycle (local Docker & Weaviate Cloud), DDL, and admin.
 
 Scope: manages local Docker clusters, Weaviate Cloud provisioning (via wcloud),
