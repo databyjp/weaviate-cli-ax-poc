@@ -21,6 +21,8 @@ class ShardInfo:
     node_objects: dict[str, int]  # node_name -> object_count
     vector_indexing_status: str
     loaded: bool | None
+    vector_queue_length: int = 0
+    compressed: bool | None = None
 
 
 @dataclass

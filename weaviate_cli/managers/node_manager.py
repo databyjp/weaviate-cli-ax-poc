@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+from typing import Any
 
 import click
 from prettytable import PrettyTable
@@ -7,9 +10,107 @@ from weaviate.client import WeaviateClient
 from weaviate_cli.types.models import CollectionInfo, NodeInfo, ShardInfo
 
 
+def _serialize_raft_stats(raft: Any) -> dict[str, Any] | None:
+    if raft is None:
+        return None
+    latest_cfg = getattr(raft, "latest_configuration", None) or []
+    members = [
+        {
+            "node_id": getattr(m, "node_id", None),
+            "address": getattr(m, "address", None),
+            "suffrage": getattr(m, "suffrage", None),
+        }
+        for m in latest_cfg
+    ]
+    return {
+        "state": getattr(raft, "state", None),
+        "term": getattr(raft, "term", None),
+        "applied_index": getattr(raft, "applied_index", None),
+        "commit_index": getattr(raft, "commit_index", None),
+        "fsm_pending": getattr(raft, "fsm_pending", None),
+        "last_contact": getattr(raft, "last_contact", None),
+        "last_log_index": getattr(raft, "last_log_index", None),
+        "last_log_term": getattr(raft, "last_log_term", None),
+        "last_snapshot_index": getattr(raft, "last_snapshot_index", None),
+        "last_snapshot_term": getattr(raft, "last_snapshot_term", None),
+        "latest_configuration_index": getattr(raft, "latest_configuration_index", None),
+        "latest_configuration": members,
+        "num_peers": getattr(raft, "num_peers", None),
+    }
+
+
 class NodeManager:
     def __init__(self, client: WeaviateClient):
         self.client = client
+
+    def get_cluster_statistics(self, *, json_output: bool = False) -> dict[str, Any]:
+        """Fetch Raft consensus statistics from GET /v1/cluster/statistics."""
+        stats = self.client.cluster.statistics()
+        raw_nodes = getattr(stats, "statistics", None) or []
+        node_entries: list[dict[str, Any]] = []
+        for entry in raw_nodes:
+            node_entries.append(
+                {
+                    "name": getattr(entry, "name", None),
+                    "status": getattr(entry, "status", None),
+                    "ready": getattr(entry, "ready", None),
+                    "db_loaded": getattr(entry, "db_loaded", None),
+                    "is_voter": getattr(entry, "is_voter", None),
+                    "is_open": getattr(entry, "is_open", None),
+                    "leader_id": getattr(entry, "leader_id", None),
+                    "leader_address": getattr(entry, "leader_address", None),
+                    "initial_last_applied_index": getattr(
+                        entry, "initial_last_applied_index", None
+                    ),
+                    "candidates": getattr(entry, "candidates", None),
+                    "raft": _serialize_raft_stats(getattr(entry, "raft", None)),
+                }
+            )
+
+        payload: dict[str, Any] = {
+            "synchronized": bool(getattr(stats, "synchronized", False)),
+            "nodes": node_entries,
+        }
+
+        if json_output:
+            click.echo(json.dumps(payload, indent=2, default=str))
+        else:
+            click.echo(f"Cluster Synchronized: {payload['synchronized']}")
+            if not node_entries:
+                click.echo("No node statistics reported.")
+            else:
+                table = PrettyTable()
+                table.field_names = [
+                    "Node",
+                    "Status",
+                    "Ready",
+                    "Raft State",
+                    "Leader",
+                    "Term",
+                    "Applied/Commit",
+                    "FSM Pending",
+                    "Voter",
+                ]
+                table.align = "l"
+                for node in node_entries:
+                    raft = node["raft"] or {}
+                    applied = raft.get("applied_index", "-")
+                    commit = raft.get("commit_index", "-")
+                    table.add_row(
+                        [
+                            node["name"],
+                            node["status"],
+                            node["ready"],
+                            raft.get("state", "-"),
+                            node["leader_id"] or "-",
+                            raft.get("term", "-"),
+                            f"{applied}/{commit}",
+                            raft.get("fsm_pending", "-"),
+                            node["is_voter"],
+                        ]
+                    )
+                click.echo(table)
+        return payload
 
     def get_nodes(
         self,
@@ -17,6 +118,7 @@ class NodeManager:
         shards: bool = False,
         collections: bool = False,
         collection: str | None = None,
+        shard: str | None = None,
         json_output: bool = False,
     ) -> None:
         if minimal:
@@ -30,25 +132,28 @@ class NodeManager:
             else:
                 self.__print_minimal_nodes(nodes)
         else:
-            nodes = self.__get_nodes_verbose(collection)
+            nodes = self.__get_nodes_verbose(collection=collection, shard=shard)
             if collection:
-                collection_shards = self.get_collection_shards(collection, nodes)
+                collection_shards = self.get_collection_shards(
+                    collection, nodes, shard_name=shard
+                )
                 if json_output:
                     rf = (
                         self.client.collections.get(collection)
                         .config.get()
                         .replication_config.factor
                     )
-                    shards_data = []
-                    for s in collection_shards:
-                        shards_data.append(
-                            {
-                                "name": s.name,
-                                "node_distribution": s.node_objects,
-                                "status": str(s.vector_indexing_status),
-                                "loaded": s.loaded,
-                            }
-                        )
+                    shards_data = [
+                        {
+                            "name": s.name,
+                            "node_distribution": s.node_objects,
+                            "status": str(s.vector_indexing_status),
+                            "vector_queue_length": s.vector_queue_length,
+                            "compressed": s.compressed,
+                            "loaded": s.loaded,
+                        }
+                        for s in collection_shards
+                    ]
                     click.echo(
                         json.dumps(
                             {
@@ -62,20 +167,21 @@ class NodeManager:
                     )
                 else:
                     self.__print_collection_shards(collection, collection_shards)
-            elif shards:
-                shard_objects = self.get_shards_objects(nodes)
+            elif shards or shard:
+                shard_objects = self.get_shards_objects(nodes, shard_name=shard)
                 if json_output:
-                    shards_data = []
-                    for s in shard_objects:
-                        shards_data.append(
-                            {
-                                "name": s.name,
-                                "collection": s.collection,
-                                "node_distribution": s.node_objects,
-                                "status": str(s.vector_indexing_status),
-                                "loaded": s.loaded,
-                            }
-                        )
+                    shards_data = [
+                        {
+                            "name": s.name,
+                            "collection": s.collection,
+                            "node_distribution": s.node_objects,
+                            "status": str(s.vector_indexing_status),
+                            "vector_queue_length": s.vector_queue_length,
+                            "compressed": s.compressed,
+                            "loaded": s.loaded,
+                        }
+                        for s in shard_objects
+                    ]
                     click.echo(
                         json.dumps({"shards": shards_data}, indent=2, default=str)
                     )
@@ -143,9 +249,11 @@ class NodeManager:
             )
         return node_infos
 
-    def get_shards_objects(self, nodes=None) -> list[ShardInfo]:
+    def get_shards_objects(
+        self, nodes=None, *, shard_name: str | None = None
+    ) -> list[ShardInfo]:
         if nodes is None:
-            nodes = self.__get_nodes_verbose()
+            nodes = self.__get_nodes_verbose(shard=shard_name)
 
         shard_dict: dict[str, ShardInfo] = {}
 
@@ -154,8 +262,11 @@ class NodeManager:
                 continue
 
             for shard in node.shards:
-                # Use composite key of collection + shard name to handle tenant names that appear in multiple collections
+                if shard_name is not None and shard.name != shard_name:
+                    continue
                 shard_key = f"{shard.collection}:{shard.name}"
+                qlen = int(getattr(shard, "vector_queue_length", 0) or 0)
+                compressed = getattr(shard, "compressed", None)
                 if shard_key not in shard_dict:
                     shard_dict[shard_key] = ShardInfo(
                         name=shard.name,
@@ -163,7 +274,13 @@ class NodeManager:
                         node_objects={},
                         vector_indexing_status=shard.vector_indexing_status,
                         loaded=shard.loaded,
+                        vector_queue_length=qlen,
+                        compressed=compressed,
                     )
+                else:
+                    shard_dict[shard_key].vector_queue_length += qlen
+                    if compressed is True:
+                        shard_dict[shard_key].compressed = True
                 shard_dict[shard_key].node_objects[node.name] = shard.object_count
 
         return list(shard_dict.values())
@@ -195,11 +312,17 @@ class NodeManager:
         return list(collection_dict.values())
 
     def get_collection_shards(
-        self, collection_name: str, nodes=None
+        self,
+        collection_name: str,
+        nodes=None,
+        *,
+        shard_name: str | None = None,
     ) -> list[ShardInfo]:
         """Get shard information for a specific collection."""
         if nodes is None:
-            nodes = self.__get_nodes_verbose()
+            nodes = self.__get_nodes_verbose(
+                collection=collection_name, shard=shard_name
+            )
 
         shard_dict: dict[str, ShardInfo] = {}
 
@@ -210,7 +333,11 @@ class NodeManager:
             for shard in node.shards:
                 if shard.collection != collection_name:
                     continue
+                if shard_name is not None and shard.name != shard_name:
+                    continue
 
+                qlen = int(getattr(shard, "vector_queue_length", 0) or 0)
+                compressed = getattr(shard, "compressed", None)
                 if shard.name not in shard_dict:
                     shard_dict[shard.name] = ShardInfo(
                         name=shard.name,
@@ -218,7 +345,13 @@ class NodeManager:
                         node_objects={},
                         vector_indexing_status=shard.vector_indexing_status,
                         loaded=shard.loaded,
+                        vector_queue_length=qlen,
+                        compressed=compressed,
                     )
+                else:
+                    shard_dict[shard.name].vector_queue_length += qlen
+                    if compressed is True:
+                        shard_dict[shard.name].compressed = True
                 shard_dict[shard.name].node_objects[node.name] = shard.object_count
 
         return list(shard_dict.values())
@@ -226,13 +359,19 @@ class NodeManager:
     def __print_collection_shards(self, collection_name: str, shards: list[ShardInfo]):
         """Print shard information for a specific collection."""
         if not shards:
-            print(f"No shards found for collection '{collection_name}'")
+            click.echo(f"No shards found for collection '{collection_name}'")
             return
 
         table = PrettyTable()
-        table.field_names = ["Shard Name", "Node Distribution", "Status", "Loaded"]
+        table.field_names = [
+            "Shard Name",
+            "Node Distribution",
+            "Status",
+            "Queue Length",
+            "Compressed",
+            "Loaded",
+        ]
 
-        # Get replication factor for the collection
         rf = (
             self.client.collections.get(collection_name)
             .config.get()
@@ -244,14 +383,26 @@ class NodeManager:
                 [f"{node}: {count}" for node, count in shard.node_objects.items()]
             )
             table.add_row(
-                [shard.name, node_dist, shard.vector_indexing_status, shard.loaded]
+                [
+                    shard.name,
+                    node_dist,
+                    shard.vector_indexing_status,
+                    shard.vector_queue_length,
+                    shard.compressed,
+                    shard.loaded,
+                ]
             )
 
-        print(f"\nCollection: {collection_name} (Replication Factor: {rf})")
-        print(table)
+        click.echo(f"\nCollection: {collection_name} (Replication Factor: {rf})")
+        click.echo(table)
 
-    def __get_nodes_verbose(self, collection: str | None = None):
-        return self.client.cluster.nodes(output="verbose", collection=collection)
+    def __get_nodes_verbose(
+        self, collection: str | None = None, shard: str | None = None
+    ):
+        kwargs: dict[str, Any] = {"output": "verbose", "collection": collection}
+        if shard is not None:
+            kwargs["shard"] = shard
+        return self.client.cluster.nodes(**kwargs)
 
     def __get_nodes_minimal(self):
         return self.client.cluster.nodes(output="minimal")
@@ -263,7 +414,7 @@ class NodeManager:
         for node in nodes:
             table.add_row([node.name, node.status, node.version])
 
-        print(table)
+        click.echo(table)
 
     def __print_nodes_info(self, nodes: list[NodeInfo]):
         table = PrettyTable()
@@ -286,7 +437,7 @@ class NodeManager:
                 ]
             )
 
-        print(table)
+        click.echo(table)
 
     def __print_shards_info(self, shards: list[ShardInfo]):
         table = PrettyTable()
@@ -295,6 +446,8 @@ class NodeManager:
             "Collection",
             "Node Distribution",
             "Status",
+            "Queue Length",
+            "Compressed",
             "Loaded",
         ]
 
@@ -308,11 +461,13 @@ class NodeManager:
                     shard.collection,
                     node_dist,
                     shard.vector_indexing_status,
+                    shard.vector_queue_length,
+                    shard.compressed,
                     shard.loaded,
                 ]
             )
 
-        print(table)
+        click.echo(table)
 
     def __print_collections_info(self, collections: list[CollectionInfo]):
         table = PrettyTable()
@@ -334,4 +489,4 @@ class NodeManager:
             )
             table.add_row([collection.name, rf, node_dist, collection.total_objects])
 
-        print(table)
+        click.echo(table)

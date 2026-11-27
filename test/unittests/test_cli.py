@@ -101,7 +101,7 @@ def test_main_noun_verb_commands_registered():
         },
         "tenant": {"create", "list", "get", "update", "delete"},
         "alias": {"create", "list", "get", "update", "delete"},
-        "node": {"list"},
+        "node": {"list", "stats"},
         "shard": {"list", "update", "state"},
         "replication": {"create", "list", "get", "cancel", "delete"},
         "backup": {"list", "create", "get", "restore", "cancel"},
