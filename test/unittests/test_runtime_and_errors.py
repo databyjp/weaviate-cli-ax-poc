@@ -102,6 +102,14 @@ def test_classify_429_usage_limit_and_cloud_backup_403_hints():
     assert rate_err.code == "RATE_LIMITED"
     assert rate_err.hint and "rate-limited" in rate_err.hint
 
+    cloud_rate_err = classify_exception(
+        UnexpectedStatusCodeError("Request", rate_resp),
+        target="https://paid.c0.eu-central-1.aws.weaviate.cloud",
+    )
+    assert cloud_rate_err.code == "RATE_LIMITED"
+    assert cloud_rate_err.hint and "rate-limited" in cloud_rate_err.hint
+    assert "1 collection" not in cloud_rate_err.hint
+
     backup_403 = classify_exception(
         InsufficientPermissionsError(
             httpx.Response(

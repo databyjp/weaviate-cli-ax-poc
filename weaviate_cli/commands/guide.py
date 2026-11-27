@@ -169,6 +169,7 @@ def render_guide_markdown(
                 "- **Built-in server:** Available directly on Weaviate v1.37.1+ via Streamable HTTP at `<WEAVIATE_URL>/v1/mcp` (enabled by default on Weaviate Cloud and by `weaviate-cli local start`).",
                 "- **Exposed tools:** `weaviate-collections-get-config`, `weaviate-tenants-list`, `weaviate-query-hybrid`, and `weaviate-objects-upsert` (authenticated with your Bearer API key under standard RBAC).",
                 "- **Secret safety:** `mcp config` references `${WEAVIATE_API_KEY}` (or `${env:WEAVIATE_API_KEY}` for VS Code) by default so credentials are not printed or committed; pass `--include-key` only when explicitly embedding a key into a gitignored client config.",
+                '- **Claude Desktop (`--client claude-desktop`):** Bridges Streamable HTTP over stdio using `mcp-proxy` (not bundled with `weaviate-cli`). Install it separately (`uv tool install mcp-proxy`, `pipx install mcp-proxy`, or `pip install mcp-proxy`) and, if Claude Desktop\'s GUI `PATH` cannot locate it, set `"command"` to the absolute path from `which mcp-proxy` (macOS/Linux) or `where mcp-proxy` (Windows).',
                 "",
             ]
         lines = [

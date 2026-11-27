@@ -16,8 +16,11 @@ from weaviate.collections.classes.config_vector_index import VectorFilterStrateg
 from weaviate.collections.classes.tenants import TenantActivityStatus
 
 from weaviate_cli.defaults import UpdateCollectionDefaults
-from weaviate_cli.errors import CLIError, ExitCode
-from weaviate_cli.specs.collection import is_cross_reference_data_type
+from weaviate_cli.errors import CLIError, ExitCode, ValidationIssue
+from weaviate_cli.specs.collection import (
+    is_cross_reference_data_type,
+    validate_vector_index_update_fields,
+)
 from weaviate_cli.utils import (
     ASYNC_REPLICATION_CONFIG_DEPRECATED_KEYS,
     ASYNC_REPLICATION_CONFIG_REMOVED_VERSION,
@@ -870,8 +873,42 @@ class CollectionManager:
                 if current_cfg.vector_index_type
                 else None
             )
+            explicit_type = vic.get("vectorIndexType")
+            if (
+                isinstance(explicit_type, str)
+                and fallback_type
+                and explicit_type.lower() != fallback_type.lower()
+            ):
+                raise CLIError(
+                    code="INVALID_UPDATE_SPEC",
+                    message=(
+                        f"Collection '{collection}' uses vector index type '{fallback_type}', "
+                        f"cannot update as '{explicit_type}'."
+                    ),
+                    exit_code=ExitCode.USAGE,
+                    hint="The vector index type of an existing collection is immutable.",
+                )
+            resolved_type = _infer_index_type(explicit_type, vic, fallback_type)
+            live_vic_issues: list[ValidationIssue] = []
+            validate_vector_index_update_fields(
+                vic,
+                path_prefix="vectorIndexConfig",
+                issues=live_vic_issues,
+                index_type=resolved_type,
+                allow_vector_index_type=True,
+            )
+            if live_vic_issues:
+                raise CLIError(
+                    code="INVALID_UPDATE_SPEC",
+                    message=(
+                        f"Vector index update validation failed for '{collection}' "
+                        f"({resolved_type} index) with {len(live_vic_issues)} issue(s)."
+                    ),
+                    exit_code=ExitCode.USAGE,
+                    issues=live_vic_issues,
+                )
             update_kwargs["vectorizer_config"] = _build_vector_index_update(
-                vic.get("vectorIndexType"),
+                explicit_type,
                 vic,
                 fallback_type=fallback_type,
             )
@@ -893,16 +930,56 @@ class CollectionManager:
                     existing_type = _enum_str(
                         existing_vc[vec_name].vector_index_config.vector_index_type()
                     )
+                explicit_vec_type = vec_patch.get("vectorIndexType")
+                if (
+                    isinstance(explicit_vec_type, str)
+                    and existing_type
+                    and explicit_vec_type.lower() != existing_type.lower()
+                ):
+                    raise CLIError(
+                        code="INVALID_UPDATE_SPEC",
+                        message=(
+                            f"Named vector '{vec_name}' uses vector index type '{existing_type}', "
+                            f"cannot update as '{explicit_vec_type}'."
+                        ),
+                        exit_code=ExitCode.USAGE,
+                        hint="The vector index type of an existing vector is immutable.",
+                    )
+                has_nested_vic = isinstance(vec_patch.get("vectorIndexConfig"), dict)
                 vic_patch = (
-                    vec_patch["vectorIndexConfig"]
-                    if isinstance(vec_patch.get("vectorIndexConfig"), dict)
-                    else vec_patch
+                    vec_patch["vectorIndexConfig"] if has_nested_vic else vec_patch
                 )
+                resolved_vec_type = _infer_index_type(
+                    explicit_vec_type, vic_patch, existing_type
+                )
+                live_vec_issues: list[ValidationIssue] = []
+                validate_vector_index_update_fields(
+                    vic_patch,
+                    path_prefix=(
+                        f"vectorConfig.{vec_name}.vectorIndexConfig"
+                        if has_nested_vic
+                        else f"vectorConfig.{vec_name}"
+                    ),
+                    issues=live_vec_issues,
+                    index_type=resolved_vec_type,
+                    allow_vector_index_type=not has_nested_vic,
+                )
+                if live_vec_issues:
+                    raise CLIError(
+                        code="INVALID_UPDATE_SPEC",
+                        message=(
+                            f"Vector index update validation failed for named vector "
+                            f"'{vec_name}' ({resolved_vec_type} index) with "
+                            f"{len(live_vec_issues)} issue(s)."
+                        ),
+                        exit_code=ExitCode.USAGE,
+                        issues=live_vec_issues,
+                    )
                 vec_updates.append(
                     wvc.Reconfigure.Vectors.update(
                         name=vec_name,
                         vector_index_config=_build_vector_index_update(
-                            vec_patch.get("vectorIndexType"),
+                            explicit_vec_type,
                             vic_patch,
                             fallback_type=existing_type,
                         ),

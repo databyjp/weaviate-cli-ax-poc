@@ -319,3 +319,27 @@ def test_mcp_config_cursor_streamable_http_and_claude_desktop_proxy(
     assert "streamablehttp" in desktop_entry["args"]
     assert "Bearer ${WEAVIATE_API_KEY}" in desktop_entry["args"]
     assert desktop_entry["args"][-1] == "https://demo.weaviate.cloud/v1/mcp"
+    prereqs = desktop_data["prerequisites"]
+    assert any("mcp-proxy" in p and "install" in p.lower() for p in prereqs)
+    assert any("which mcp-proxy" in p for p in prereqs)
+
+    with patch.dict(
+        "os.environ",
+        {
+            "HOME": str(tmp_path),
+            "WEAVIATE_URL": "https://demo.weaviate.cloud",
+            "WEAVIATE_API_KEY": "secret-key",
+        },
+        clear=True,
+    ):
+        desktop_text_res = cli_runner.invoke(
+            main, ["--no-json", "mcp", "config", "--client", "claude-desktop"]
+        )
+        guide_res = cli_runner.invoke(main, ["guide", "mcp"])
+
+    assert desktop_text_res.exit_code == 0, desktop_text_res.stderr
+    assert "Prerequisites:" in desktop_text_res.stdout
+    assert "uv tool install mcp-proxy" in desktop_text_res.stdout
+    assert "which mcp-proxy" in desktop_text_res.stdout
+    assert "mcp-proxy" in guide_res.stdout
+    assert "which mcp-proxy" in guide_res.stdout

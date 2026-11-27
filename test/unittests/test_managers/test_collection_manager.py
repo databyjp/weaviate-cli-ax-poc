@@ -453,6 +453,59 @@ def test_update_collection_from_spec_and_named_vector_flags(mock_client):
     assert multi_exc.value.exit_code == ExitCode.USAGE
 
 
+def test_update_collection_from_spec_rejects_index_type_incompatible_fields(
+    mock_client,
+):
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+
+    mock_col = MagicMock()
+    mock_flat_vec = MagicMock()
+    mock_flat_vec.vector_index_config.vector_index_type.return_value = MagicMock(
+        value="flat"
+    )
+    mock_col.config.get.return_value = MagicMock(
+        vector_config={"body_vec": mock_flat_vec},
+        vectorizer=None,
+        vector_index_type=MagicMock(value="flat"),
+    )
+    mock_collections.get.return_value = mock_col
+
+    manager = CollectionManager(mock_client)
+
+    # Sending HNSW-only 'filterStrategy' to a flat named vector must fail, not silently drop
+    with pytest.raises(CLIError) as exc_info:
+        manager.update_collection_from_spec(
+            "Articles",
+            {
+                "vectorConfig": {
+                    "body_vec": {
+                        "vectorIndexConfig": {"filterStrategy": "pathseer"},
+                    }
+                }
+            },
+        )
+    assert exc_info.value.code == "INVALID_UPDATE_SPEC"
+    assert exc_info.value.exit_code == ExitCode.USAGE
+    mock_col.config.update.assert_not_called()
+
+    # Sending mismatched vectorIndexType on top-level vectorIndexConfig must fail
+    with pytest.raises(CLIError) as mismatch_exc:
+        manager.update_collection_from_spec(
+            "Articles",
+            {
+                "vectorIndexConfig": {
+                    "vectorIndexType": "hnsw",
+                    "ef": 64,
+                }
+            },
+        )
+    assert mismatch_exc.value.code == "INVALID_UPDATE_SPEC"
+    assert mismatch_exc.value.exit_code == ExitCode.USAGE
+    mock_col.config.update.assert_not_called()
+
+
 def test_delete_property_index(mock_client):
     mock_collections = MagicMock()
     mock_client.collections = mock_collections

@@ -207,12 +207,11 @@ def _classify_exception_inner(
             )
         if status_code == 429:
             is_usage_limit = "usage_limit_exceeded" in message.lower()
-            is_cloud = bool(target and "weaviate.cloud" in target.lower())
             hint = (
                 "Weaviate Cloud tier limit reached (free tier allows 1 collection, "
                 "3 tenants/collection, and 100,000 objects). Delete an unused collection "
                 "or upgrade your cluster tier at https://console.weaviate.cloud."
-                if (is_usage_limit or is_cloud)
+                if is_usage_limit
                 else "Request was rate-limited or exceeded a server quota. Retry after backing off or check cluster limits."
             )
             return CLIError(
