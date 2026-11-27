@@ -14,6 +14,7 @@ from weaviate_cli.defaults import (
 from weaviate_cli.managers.backup_manager import BackupManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     get_runtime,
     handle_command_error,
@@ -22,7 +23,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("backup", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("backup", cls=AXGroup)
 def backup_group() -> None:
     """Manage backups and restores in Weaviate."""
 

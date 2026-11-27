@@ -282,6 +282,46 @@ def test_local_start_idempotent_when_already_running_and_restarts_when_stopped()
     assert docker_start_called
 
 
+def test_degraded_default_start_only_restarts_stopped_vectorizer():
+    sidecar_running = False
+
+    def runner(args, stdin_text):
+        nonlocal sidecar_running
+        if args[1] in ("info", "compose"):
+            return CommandResult(0, "ok", "")
+        if args[1] == "ps":
+            return CommandResult(0, "c1\nc2", "")
+        if args[1] == "inspect":
+            entries = [
+                _container_inspect_entry(
+                    name="db",
+                    service="weaviate",
+                    image=WEAVIATE_LATEST_IMAGE,
+                    http_port=8080,
+                    grpc_port=50051,
+                ),
+                _container_inspect_entry(
+                    name="vectorizer",
+                    service="transformers",
+                    image=TRANSFORMERS_IMAGE,
+                    running=sidecar_running,
+                ),
+            ]
+            return CommandResult(0, json.dumps(entries), "")
+        assert list(args) == ["docker", "start", "vectorizer"]
+        sidecar_running = True
+        return CommandResult(0, "vectorizer", "")
+
+    manager = LocalManager(
+        runner=runner,
+        port_checker=lambda _: True,
+        http_ready_checker=lambda _: 200,
+        mcp_probe=lambda *_: {},
+    )
+    result = manager.start()
+    assert result["action"] == "started" and result["state"] == "running"
+
+
 def test_local_start_detects_config_mismatch_across_modes_and_vectorizers(tmp_path):
     compose_path = tmp_path / "docker-compose.yml"
     compose_path.write_text("services: {}\n", encoding="utf-8")
@@ -576,6 +616,32 @@ def test_local_stop_logs_and_destroy_only_target_managed_project():
     assert destroy_res["removed_networks"] == ["weaviate-cli-local_default"]
     assert destroy_res["removed_volumes"] == ["weaviate-cli-local_weaviate_data"]
     assert len(removed_calls) == 3
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (("network", "ls"), "list local networks"),
+        (("volume", "ls"), "list local volumes"),
+        (("network", "rm"), "remove local networks"),
+    ],
+)
+def test_destroy_reports_discovery_and_cleanup_failures(failure, message):
+    def runner(args, stdin_text):
+        if tuple(args[1:3]) == failure:
+            return CommandResult(1, "", "docker refused")
+        if args[1] in ("info", "ps"):
+            return CommandResult(0, "", "")
+        assert (
+            args[2] == "ls"
+            and f"label={COMPOSE_PROJECT_LABEL}={LOCAL_PROJECT_NAME}" in args
+        )
+        return CommandResult(0, "managed-net" if args[1] == "network" else "", "")
+
+    with pytest.raises(CLIError, match=message) as err:
+        LocalManager(runner=runner).destroy()
+    assert err.value.code == "DOCKER_ERROR" and err.value.exit_code == ExitCode.RUNTIME
+    assert "docker refused" in err.value.message
 
 
 def test_local_cli_template_outputs_raw_yaml_without_docker(cli_runner: CliRunner):

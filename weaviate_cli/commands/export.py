@@ -13,6 +13,7 @@ from weaviate_cli.defaults import (
 from weaviate_cli.managers.export_manager import ExportManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     get_runtime,
     handle_command_error,
@@ -20,7 +21,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("export", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("export", cls=AXGroup)
 def export_group() -> None:
     """Manage collection exports in Weaviate."""
 

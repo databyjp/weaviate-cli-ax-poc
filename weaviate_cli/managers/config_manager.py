@@ -252,12 +252,21 @@ class ConfigManager:
 
     def _apply_url_override(self, raw_url: str) -> None:
         cleaned = raw_url.rstrip("/")
+        previous = urlparse(self.rest_base_url)
         self.config["host"] = cleaned
-        # Clear inherited localhost ports when switching to an explicit URL so
-        # scheme defaults (443 for https, 80 for http) or URL ports take effect.
         if self.__is_url(cleaned):
-            parsed = urlparse(cleaned)
-            self.config["http_port"] = self.__get_port(parsed)
+            self.config["http_port"] = self.__get_port(urlparse(cleaned))
+        current = urlparse(self.rest_base_url)
+        if (
+            previous.scheme,
+            previous.hostname,
+            self.__get_port(previous),
+            previous.path,
+        ) != (current.scheme, current.hostname, self.__get_port(current), current.path):
+            # A saved gRPC endpoint belongs to the old REST target. This layer's
+            # explicit gRPC override, if supplied, is applied after the REST URL.
+            self.config.pop("grpc_host", None)
+            self.config.pop("grpc_port", None)
 
     def _apply_grpc_url_override(self, raw_grpc_url: str) -> None:
         cleaned = raw_grpc_url.rstrip("/")
@@ -315,71 +324,28 @@ class ConfigManager:
     def _resolve_grpc_details(self) -> dict[str, Any]:
         """Resolve effective gRPC host, port, and TLS mode without network calls."""
         raw_host = str(self.config.get("host", self.default_host)).rstrip("/")
-        if raw_host == "localhost":
-            grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
-            return {"host": "localhost", "port": grpc_port, "secure": False}
-
-        if self._is_weaviate_cloud_host(raw_host):
-            hostname = (
-                urlparse(raw_host).hostname if self.__is_url(raw_host) else raw_host
-            ) or raw_host
-            raw_grpc = self.config.get("grpc_host")
-            if raw_grpc:
-                raw_grpc_str = str(raw_grpc).rstrip("/")
-                if self.__is_url(raw_grpc_str):
-                    gp = urlparse(raw_grpc_str)
-                    return {
-                        "host": gp.hostname or raw_grpc_str,
-                        "port": self.__get_port(gp),
-                        "secure": gp.scheme == "https",
-                    }
-                grpc_port = int(self.config.get("grpc_port", 443))
+        rest = urlparse(self.rest_base_url)
+        cloud = self._is_weaviate_cloud_host(raw_host)
+        grpc_host = self.config.get("grpc_host")
+        configured_port = self.config.get("grpc_port")
+        if grpc_host:
+            if self.__is_url(grpc_host):
+                grpc = urlparse(grpc_host)
                 return {
-                    "host": raw_grpc_str,
-                    "port": grpc_port,
-                    "secure": grpc_port == 443,
+                    "host": grpc.hostname,
+                    "port": int(configured_port or self.__get_port(grpc)),
+                    "secure": grpc.scheme == "https",
                 }
-            return {"host": f"grpc-{hostname}", "port": 443, "secure": True}
+            port = int(configured_port or (443 if cloud else self.default_grpc_port))
+            return {"host": grpc_host, "port": port, "secure": port == 443}
 
-        if self.__is_url(raw_host):
-            host_parsed = urlparse(raw_host)
-            raw_grpc = self.config.get("grpc_host")
-            if raw_grpc:
-                raw_grpc_str = str(raw_grpc).rstrip("/")
-                if self.__is_url(raw_grpc_str):
-                    gp = urlparse(raw_grpc_str)
-                    grpc_port = (
-                        self.__get_port(gp)
-                        if "grpc_port" not in self.config
-                        or self.config["grpc_port"] == ""
-                        else int(self.config["grpc_port"])
-                    )
-                    return {
-                        "host": gp.hostname or raw_grpc_str,
-                        "port": grpc_port,
-                        "secure": gp.scheme == "https",
-                    }
-                grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
-                return {
-                    "host": raw_grpc_str,
-                    "port": grpc_port,
-                    "secure": grpc_port == 443,
-                }
-            grpc_secure = host_parsed.scheme == "https"
-            grpc_port = (
-                443
-                if grpc_secure
-                else int(self.config.get("grpc_port", self.default_grpc_port))
-            )
-            return {
-                "host": host_parsed.hostname or raw_host,
-                "port": grpc_port,
-                "secure": grpc_secure,
-            }
-
-        grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
-        grpc_host = str(self.config.get("grpc_host", raw_host))
-        return {"host": grpc_host, "port": grpc_port, "secure": grpc_port == 443}
+        if cloud:
+            return {"host": f"grpc-{rest.hostname}", "port": 443, "secure": True}
+        if self.__is_url(raw_host) and rest.scheme == "https":
+            return {"host": rest.hostname, "port": 443, "secure": True}
+        port = int(configured_port or self.default_grpc_port)
+        secure = not self.__is_url(raw_host) and raw_host != "localhost" and port == 443
+        return {"host": rest.hostname, "port": port, "secure": secure}
 
     def describe_connection(self) -> dict[str, Any]:
         """Return resolved connection settings with all secret values redacted."""
@@ -512,9 +478,9 @@ class ConfigManager:
         raw_host = str(self.config["host"]).rstrip("/")
 
         # Localhost handling uses special helpers
-        if raw_host == "localhost":
-            http_port = int(self.config["http_port"])
-            grpc_port = int(self.config["grpc_port"])
+        if raw_host == "localhost" and not self.config.get("grpc_host"):
+            http_port = int(self.config.get("http_port", self.default_port))
+            grpc_port = self._resolve_grpc_details()["port"]
             common_kwargs: dict[str, Any] = dict(
                 host=self.__get_host(http_port),
                 port=http_port,
@@ -528,7 +494,7 @@ class ConfigManager:
             return weaviate.connect_to_local(**common_kwargs)
 
         # Weaviate Cloud handling with retry fallback (warnings strictly on stderr)
-        if self._is_weaviate_cloud_host(raw_host):
+        if self._is_weaviate_cloud_host(raw_host) and not self.config.get("grpc_host"):
             common_kwargs = dict(
                 cluster_url=raw_host,
                 auth_credentials=auth_config,
@@ -557,68 +523,24 @@ class ConfigManager:
                     **{**common_kwargs, "skip_init_checks": True}
                 )
 
-        # Custom host handling (URL vs hostname/IP)
+        rest = urlparse(self.rest_base_url)
+        http_port = self.__get_port(rest)
         if self.__is_url(raw_host):
-            host_parsed = urlparse(raw_host)
-            raw_grpc = self.config.get("grpc_host")
-            if raw_grpc:
-                raw_grpc_str = str(raw_grpc).rstrip("/")
-                if self.__is_url(raw_grpc_str):
-                    grpc_parsed = urlparse(raw_grpc_str)
-                    grpc_host = grpc_parsed.hostname
-                    grpc_secure = grpc_parsed.scheme == "https"
-                    grpc_port = (
-                        self.__get_port(grpc_parsed)
-                        if "grpc_port" not in self.config
-                        or self.config["grpc_port"] == ""
-                        else int(self.config["grpc_port"])
-                    )
-                else:
-                    grpc_host = raw_grpc_str
-                    grpc_port = int(
-                        self.config.get("grpc_port", self.default_grpc_port)
-                    )
-                    grpc_secure = grpc_port == 443
-            else:
-                grpc_host = host_parsed.hostname
-                grpc_secure = host_parsed.scheme == "https"
-                grpc_port = (
-                    443
-                    if grpc_secure
-                    else int(self.config.get("grpc_port", self.default_grpc_port))
-                )
-
-            http_port = (
-                self.__get_port(host_parsed)
-                if "http_port" not in self.config or self.config["http_port"] == ""
-                else int(self.config["http_port"])
-            )
-            common_kwargs = dict(
-                http_host=host_parsed.hostname,
-                grpc_host=grpc_host,
-                grpc_secure=grpc_secure,
-                http_secure=host_parsed.scheme == "https",
-                http_port=http_port,
-                grpc_port=grpc_port,
-                auth_credentials=auth_config,
-                headers=headers,
-                additional_config=additional_config,
-            )
-        else:
-            http_port = int(self.config.get("http_port", self.default_port))
-            grpc_port = int(self.config.get("grpc_port", self.default_grpc_port))
-            grpc_host = self.config.get("grpc_host", raw_host)
-            common_kwargs = dict(
-                http_host=raw_host,
-                grpc_host=grpc_host,
-                grpc_secure=grpc_port == 443,
-                http_secure=http_port == 443,
-                http_port=http_port,
-                grpc_port=grpc_port,
-                auth_credentials=auth_config,
-                headers=headers,
-                additional_config=additional_config,
-            )
+            http_port = int(self.config.get("http_port") or http_port)
+        grpc = self._resolve_grpc_details()
+        common_kwargs = dict(
+            http_host=self.__get_host(http_port)
+            if raw_host == "localhost"
+            else rest.hostname,
+            http_port=http_port,
+            http_secure=rest.scheme == "https" and raw_host != "localhost",
+            grpc_host=grpc["host"],
+            grpc_port=grpc["port"],
+            grpc_secure=grpc["secure"],
+            auth_credentials=auth_config,
+            headers=headers,
+            additional_config=additional_config,
+        )
 
         if async_client:
             return weaviate.use_async_with_custom(**common_kwargs)

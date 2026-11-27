@@ -11,6 +11,7 @@ from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.node_manager import NodeManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     get_runtime,
     handle_command_error,
@@ -18,7 +19,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("node", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("node", cls=AXGroup)
 def node_group() -> None:
     """Inspect Weaviate cluster nodes."""
 

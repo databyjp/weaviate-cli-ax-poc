@@ -106,11 +106,12 @@ def emit_error(
     error: CLIError,
     *,
     command: str,
+    data: Any = None,
 ) -> NoReturn:
-    """Emit a structured error and exit with its semantic exit code."""
+    """Emit an error and exit. JSON output can retain data from a completed operation."""
     if runtime.json_output:
         envelope = build_envelope(
-            data=None,
+            data=data,
             error=error.to_dict(),
             command=command,
             exit_code=error.exit_code,

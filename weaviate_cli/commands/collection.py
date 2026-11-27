@@ -17,6 +17,7 @@ from weaviate_cli.errors import CLIError, ExitCode
 from weaviate_cli.managers.collection_manager import CollectionManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_error,
     emit_success,
     emit_warning,
@@ -86,7 +87,7 @@ def _render_collections_table(rows: list[dict[str, Any]]) -> None:
     click.echo(f"Total: {len(rows)} collections")
 
 
-@click.group("collection", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("collection", cls=AXGroup)
 def collection_group() -> None:
     """Manage Weaviate collections (DDL and operational configuration)."""
 

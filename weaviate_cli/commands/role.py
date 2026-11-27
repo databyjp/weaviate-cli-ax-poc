@@ -13,6 +13,7 @@ from weaviate_cli.managers.role_manager import RoleManager
 from weaviate_cli.managers.user_manager import UserManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     emit_success,
     get_runtime,
@@ -22,7 +23,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("role", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("role", cls=AXGroup)
 def role_group() -> None:
     """Manage RBAC roles and permissions in Weaviate."""
 

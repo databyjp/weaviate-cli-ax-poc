@@ -10,6 +10,7 @@ from weaviate_cli.defaults import CreateTenantsDefaults
 from weaviate_cli.managers.tenant_manager import TenantManager
 from weaviate_cli.runtime import (
     DEFAULT_CONTEXT_SETTINGS,
+    AXGroup,
     emit_captured_json_or_text,
     get_runtime,
     handle_command_error,
@@ -17,7 +18,7 @@ from weaviate_cli.runtime import (
 from weaviate_cli.utils import get_client_from_context
 
 
-@click.group("tenant", context_settings=DEFAULT_CONTEXT_SETTINGS)
+@click.group("tenant", cls=AXGroup)
 def tenant_group() -> None:
     """Manage multi-tenancy tenants in Weaviate."""
 

@@ -326,6 +326,74 @@ def test_env_custom_url_without_grpc_url_derives_grpc_host():
             assert kwargs["grpc_secure"] is False
 
 
+@pytest.mark.parametrize("async_client", [False, True])
+@pytest.mark.parametrize(
+    ("target", "http_host", "http_port"),
+    [
+        ("localhost", "localhost", 8080),
+        ("demo.weaviate.cloud", "demo.weaviate.cloud", 443),
+        ("http://custom:8081", "custom", 8081),
+    ],
+)
+def test_explicit_grpc_target_matches_config_show(
+    tmp_path, async_client, target, http_host, http_port
+):
+    config = ConfigManager(
+        url=target, grpc_url="https://proxy:7443", env={"HOME": str(tmp_path)}
+    )
+    constructor = (
+        "weaviate.use_async_with_custom"
+        if async_client
+        else "weaviate.connect_to_custom"
+    )
+    with (
+        patch(constructor) as connect,
+        patch("socket.create_connection", side_effect=OSError),
+    ):
+        (config.get_async_client if async_client else config.get_client)()
+    kwargs = connect.call_args.kwargs
+    assert (kwargs["http_host"], kwargs["http_port"], kwargs["http_secure"]) == (
+        http_host,
+        http_port,
+        http_port == 443,
+    )
+    assert config.describe_connection()["grpc"] == {
+        "host": "proxy",
+        "port": 7443,
+        "secure": True,
+    }
+    assert {
+        k: kwargs[f"grpc_{k}"] for k in ("host", "port", "secure")
+    } == config.describe_connection()["grpc"]
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_host", "expected_port"),
+    [
+        ("http://cluster-b:8080", "cluster-b", 50051),
+        ("http://cluster-a:8080/", "proxy-a", 55051),
+    ],
+)
+def test_rest_override_inherits_grpc_only_for_same_target(
+    tmp_path, url, expected_host, expected_port
+):
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps(
+            {
+                "host": "http://cluster-a:8080",
+                "grpc_host": "proxy-a",
+                "grpc_port": 55051,
+            }
+        )
+    )
+    config = ConfigManager(config_file=str(profile), url=url, env={})
+    with patch("weaviate.connect_to_custom") as connect:
+        config.get_client()
+    assert connect.call_args.kwargs["grpc_host"] == expected_host
+    assert connect.call_args.kwargs["grpc_port"] == expected_port
+
+
 def test_grpc_url_accepts_schemeless_host_port():
     with patch("pathlib.Path.exists", return_value=False):
         with patch("weaviate.connect_to_custom") as mock_connect:

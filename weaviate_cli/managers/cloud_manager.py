@@ -14,12 +14,18 @@ import tarfile
 import tempfile
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from weaviate_cli.credentials import (
+    KeyDestination,
+    require_key_destination,
+    reserve_key_file,
+)
 from weaviate_cli.errors import CLIError, ExitCode
 
 WCLOUD_VERSION = "0.1.4"
@@ -246,101 +252,6 @@ def extract_cluster_credentials(
         api_key = raw_key.strip()
 
     return url, grpc_url, api_key
-
-
-def _set_0600_permissions(path: Path) -> None:
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-
-
-def write_env_credentials(
-    path: str | Path,
-    *,
-    url: str | None,
-    api_key: str | None,
-    grpc_url: str | None = None,
-) -> Path:
-    """Create or update a .env file with canonical WEAVIATE_* variables (mode 0600)."""
-    dest = Path(path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    updates: dict[str, str] = {}
-    if url:
-        updates["WEAVIATE_URL"] = url
-    if api_key:
-        updates["WEAVIATE_API_KEY"] = api_key
-    if grpc_url:
-        updates["WEAVIATE_GRPC_URL"] = grpc_url
-
-    existing_lines: list[str] = []
-    if dest.exists():
-        existing_lines = dest.read_text(encoding="utf-8").splitlines()
-
-    seen: set[str] = set()
-    output_lines: list[str] = []
-    for raw_line in existing_lines:
-        stripped = raw_line.strip()
-        key_match: str | None = None
-        if stripped and not stripped.startswith("#"):
-            candidate = (
-                stripped[len("export ") :].strip()
-                if stripped.startswith("export ")
-                else stripped
-            )
-            if "=" in candidate:
-                k = candidate.split("=", 1)[0].strip()
-                if k in updates:
-                    key_match = k
-        if key_match is not None:
-            if key_match not in seen:
-                prefix = "export " if stripped.startswith("export ") else ""
-                output_lines.append(f"{prefix}{key_match}={updates[key_match]}")
-                seen.add(key_match)
-        else:
-            output_lines.append(raw_line)
-
-    for key, value in updates.items():
-        if key not in seen:
-            output_lines.append(f"{key}={value}")
-
-    content = "\n".join(output_lines) + "\n"
-    dest.write_text(content, encoding="utf-8")
-    _set_0600_permissions(dest)
-    return dest
-
-
-def write_config_credentials(
-    path: str | Path,
-    *,
-    url: str | None,
-    api_key: str | None,
-    grpc_url: str | None = None,
-) -> Path:
-    """Write a Weaviate CLI JSON config file for the cluster (mode 0600)."""
-    dest = Path(path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    config_data: dict[str, Any] = {}
-    if dest.exists():
-        try:
-            loaded = json.loads(dest.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                config_data = loaded
-        except json.JSONDecodeError:
-            config_data = {}
-
-    if url:
-        config_data["host"] = url
-    if grpc_url:
-        config_data["grpc_host"] = grpc_url
-    if api_key:
-        config_data["auth"] = {"type": "api_key", "api_key": api_key}
-
-    dest.write_text(json.dumps(config_data, indent=2) + "\n", encoding="utf-8")
-    _set_0600_permissions(dest)
-    return dest
 
 
 def _map_wcloud_exit_code(rc: int, error_code: str) -> ExitCode:
@@ -720,8 +631,8 @@ class CloudManager:
         self,
         cluster: dict[str, Any],
         *,
-        write_env: str | None,
-        write_config: str | None,
+        destinations: list[KeyDestination],
+        include_key: bool,
         waited: bool,
     ) -> tuple[dict[str, Any], list[str]]:
         warnings: list[str] = []
@@ -734,21 +645,24 @@ class CloudManager:
 
         saved_paths: list[str] = []
         if api_key is not None:
-            written_files: list[Path] = []
-            if write_env:
-                saved = write_env_credentials(
-                    write_env, url=url, api_key=api_key, grpc_url=grpc_url
-                )
-                saved_paths.append(str(saved))
-                written_files.append(saved)
-            if write_config:
-                saved_cfg = write_config_credentials(
-                    write_config, url=url, api_key=api_key, grpc_url=grpc_url
-                )
-                saved_paths.append(str(saved_cfg))
-                written_files.append(saved_cfg)
-
-            for written in written_files:
+            failed_paths: list[str] = []
+            for destination in destinations:
+                written = destination.path
+                try:
+                    destination.save(api_key, url=url, grpc_url=grpc_url)
+                except Exception:
+                    # The cloud operation already succeeded. Keep its one-time key
+                    # available and still attempt any other requested destination.
+                    failed_paths.append(str(written))
+                    continue
+                finally:
+                    if destination.retained_original:
+                        warnings.append(
+                            f"Previous file retained at '{destination.retained_original}'."
+                        )
+                saved_paths.append(str(written))
+                if destination.kind == "env":
+                    enriched["next_step"] = f"weaviate-cli --env-file {written} status"
                 if self._git_ignored_checker(written) is False:
                     warnings.append(
                         f"'{written}' is inside a Git repository and is not ignored by "
@@ -756,6 +670,8 @@ class CloudManager:
                         "key is not exposed."
                     )
 
+            if failed_paths:
+                enriched["credential_save_failures"] = failed_paths
             enriched["credentials_saved_to"] = saved_paths
             if saved_paths:
                 joined = ", ".join(saved_paths)
@@ -764,10 +680,8 @@ class CloudManager:
                     "Weaviate Cloud displays this key only once — keep that file "
                     "secret (gitignored) and back it up if needed."
                 )
-                if write_env:
-                    enriched["next_step"] = (
-                        f"weaviate-cli --env-file {write_env} status"
-                    )
+                if not include_key:
+                    enriched.pop("api_key", None)
             else:
                 notice = (
                     "IMPORTANT: This admin API key is displayed ONCE by Weaviate Cloud "
@@ -789,6 +703,48 @@ class CloudManager:
 
         return enriched, warnings
 
+    def _key_bearing_cluster_call(
+        self,
+        args: list[str],
+        *,
+        write_env: str | None,
+        write_config: str | None,
+        include_key: bool,
+        allow_install: bool,
+        waited: bool,
+    ) -> dict[str, Any]:
+        if waited:
+            require_key_destination(
+                bool(write_env or write_config or include_key),
+                "--write-env, --write-config or --include-key",
+            )
+        with ExitStack() as reservations:
+            destinations = []
+            if write_env:
+                destinations.append(
+                    reservations.enter_context(reserve_key_file(write_env, "env"))
+                )
+            if write_config:
+                destinations.append(
+                    reservations.enter_context(reserve_key_file(write_config, "config"))
+                )
+            wcloud_bin, _ = self.ensure_wcloud(allow_install=allow_install)
+            self._ensure_authenticated(wcloud_bin)
+            if args[:2] == ["cluster", "create"] and waited:
+                self._emit_progress(
+                    "Creating Weaviate Cloud cluster and waiting for READY (this may take several minutes)..."
+                )
+            envelope = self._invoke_wcloud_json(wcloud_bin, args)
+            raw_cluster = envelope.get("data")
+            enriched, warnings = self._attach_credential_handling(
+                raw_cluster if isinstance(raw_cluster, dict) else {},
+                destinations=destinations,
+                include_key=include_key,
+                waited=waited,
+            )
+            enriched["warnings"] = warnings
+            return enriched
+
     def create_cluster(
         self,
         *,
@@ -797,6 +753,7 @@ class CloudManager:
         tier: str | None = None,
         wait: bool = False,
         timeout: str | None = None,
+        include_key: bool = False,
         write_env: str | None = None,
         write_config: str | None = None,
         allow_install: bool = False,
@@ -806,12 +763,12 @@ class CloudManager:
                 code="USAGE_ERROR",
                 message="--timeout requires --wait.",
                 exit_code=ExitCode.USAGE,
-                hint="Pass --wait alongside --timeout (e.g. weaviate-cli cloud create --wait --timeout 15m).",
+                hint="Use --wait with a key destination, for example --wait --timeout 15m --write-env .env.cloud.",
             )
-        if (write_env or write_config) and not wait:
+        if (write_env or write_config or include_key) and not wait:
             raise CLIError(
                 code="USAGE_ERROR",
-                message="--write-env and --write-config require --wait on 'cloud create'.",
+                message="Key destination options require --wait on 'cloud create'.",
                 exit_code=ExitCode.USAGE,
                 hint=(
                     "Pass --wait to capture the one-time API key upon creation, or "
@@ -819,9 +776,6 @@ class CloudManager:
                     "once the cluster is READY."
                 ),
             )
-
-        wcloud_bin, _ = self.ensure_wcloud(allow_install=allow_install)
-        self._ensure_authenticated(wcloud_bin)
 
         args = ["cluster", "create"]
         if name:
@@ -832,23 +786,17 @@ class CloudManager:
             args.extend(["--tier", tier])
         if wait:
             args.append("--wait")
-            self._emit_progress(
-                "Creating Weaviate Cloud cluster and waiting for READY (this may take several minutes)..."
-            )
         if timeout:
             args.extend(["--timeout", timeout])
 
-        envelope = self._invoke_wcloud_json(wcloud_bin, args)
-        raw_cluster = envelope.get("data")
-        cluster = dict(raw_cluster) if isinstance(raw_cluster, dict) else {}
-        enriched, warnings = self._attach_credential_handling(
-            cluster,
+        return self._key_bearing_cluster_call(
+            args,
             write_env=write_env,
             write_config=write_config,
+            include_key=include_key,
+            allow_install=allow_install,
             waited=wait,
         )
-        enriched["warnings"] = warnings
-        return enriched
 
     def list_clusters(self, *, allow_install: bool = False) -> dict[str, Any]:
         wcloud_bin, _ = self.ensure_wcloud(allow_install=allow_install)
@@ -864,21 +812,17 @@ class CloudManager:
         *,
         write_env: str | None = None,
         write_config: str | None = None,
+        include_key: bool = False,
         allow_install: bool = False,
     ) -> dict[str, Any]:
-        wcloud_bin, _ = self.ensure_wcloud(allow_install=allow_install)
-        self._ensure_authenticated(wcloud_bin)
-        envelope = self._invoke_wcloud_json(wcloud_bin, ["cluster", "get", cluster_id])
-        raw_cluster = envelope.get("data")
-        cluster = dict(raw_cluster) if isinstance(raw_cluster, dict) else {}
-        enriched, warnings = self._attach_credential_handling(
-            cluster,
+        return self._key_bearing_cluster_call(
+            ["cluster", "get", cluster_id],
             write_env=write_env,
             write_config=write_config,
+            include_key=include_key,
+            allow_install=allow_install,
             waited=True,
         )
-        enriched["warnings"] = warnings
-        return enriched
 
     def cluster_status(
         self, cluster_id: str, *, allow_install: bool = False
