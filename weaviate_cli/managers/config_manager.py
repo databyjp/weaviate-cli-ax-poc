@@ -257,10 +257,18 @@ class ConfigManager:
 
     def _apply_grpc_url_override(self, raw_grpc_url: str) -> None:
         cleaned = raw_grpc_url.rstrip("/")
-        self.config["grpc_host"] = cleaned
         if self.__is_url(cleaned):
             parsed = urlparse(cleaned)
+            self.config["grpc_host"] = cleaned
             self.config["grpc_port"] = self.__get_port(parsed)
+            return
+        if ":" in cleaned and not cleaned.startswith("["):
+            host_part, port_part = cleaned.rsplit(":", 1)
+            if host_part and port_part.isdigit():
+                self.config["grpc_host"] = host_part
+                self.config["grpc_port"] = int(port_part)
+                return
+        self.config["grpc_host"] = cleaned
 
     @property
     def target_description(self) -> str:

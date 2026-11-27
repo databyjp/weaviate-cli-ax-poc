@@ -326,6 +326,24 @@ def test_env_custom_url_without_grpc_url_derives_grpc_host():
             assert kwargs["grpc_secure"] is False
 
 
+def test_grpc_url_accepts_schemeless_host_port():
+    with patch("pathlib.Path.exists", return_value=False):
+        with patch("weaviate.connect_to_custom") as mock_connect:
+            config = ConfigManager(
+                url="http://127.0.0.1:18080",
+                grpc_url="127.0.0.1:51051",
+                env={},
+            )
+            config.get_client()
+
+            kwargs = mock_connect.call_args.kwargs
+            assert kwargs["http_host"] == "127.0.0.1"
+            assert kwargs["http_port"] == 18080
+            assert kwargs["grpc_host"] == "127.0.0.1"
+            assert kwargs["grpc_port"] == 51051
+            assert kwargs["grpc_secure"] is False
+
+
 def test_wcd_grpc_fallback_warning_routes_to_stderr(capsys):
     from weaviate.exceptions import WeaviateGRPCUnavailableError
 
