@@ -199,11 +199,36 @@ def _classify_exception_inner(
                 exit_code=ExitCode.NOT_FOUND,
             )
         if status_code in (400, 422):
+            lower_msg = message.lower()
+            is_missing_module = (
+                "module is not enabled" in lower_msg
+                or "no module with name" in lower_msg
+                or ("module" in lower_msg and "not enabled" in lower_msg)
+            )
+            if is_missing_module:
+                return CLIError(
+                    code="MODULE_NOT_ENABLED",
+                    message=message,
+                    exit_code=ExitCode.RUNTIME,
+                    hint=(
+                        "Enable the required module on your Weaviate cluster "
+                        "(run 'weaviate-cli status' to see currently enabled modules)."
+                    ),
+                    details={"status_code": status_code},
+                )
             return CLIError(
                 code="SERVER_VALIDATION_ERROR",
                 message=message,
                 exit_code=ExitCode.USAGE,
                 hint="Inspect the server message above and verify your input or schema JSON.",
+            )
+        if status_code == 501:
+            return CLIError(
+                code="NOT_IMPLEMENTED",
+                message=message,
+                exit_code=ExitCode.RUNTIME,
+                hint="This endpoint is not enabled or supported on the target Weaviate server.",
+                details={"status_code": 501},
             )
         if status_code == 429:
             is_usage_limit = "usage_limit_exceeded" in message.lower()

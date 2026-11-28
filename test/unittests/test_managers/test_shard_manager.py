@@ -119,3 +119,26 @@ def test_update_shards_invalid_all_flags(mock_client):
 
     with pytest.raises(Exception):
         manager.update_shards("READY", None, "shard1", True)
+
+
+def test_get_shards_json_uses_vector_queue_length(mock_client, capsys):
+    import json
+
+    manager = ShardManager(mock_client)
+    mock_collections = MagicMock()
+    mock_client.collections = mock_collections
+    mock_collections.exists.return_value = True
+
+    mock_collection = MagicMock()
+    mock_client.collections.get.return_value = mock_collection
+
+    mock_shard = MagicMock()
+    mock_shard.name = "shard1"
+    mock_shard.status = "READY"
+    mock_shard.vector_queue_size = 7
+    mock_collection.config.get_shards.return_value = [mock_shard]
+
+    manager.get_shards("TestCollection", json_output=True)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["shards"][0]["vector_queue_length"] == 7
+    assert "vector_queue_size" not in payload["shards"][0]

@@ -153,7 +153,7 @@ class BackupManager:
                 "collections": list(entry.collections or []),
                 "started_at": str(entry.started_at) if entry.started_at else None,
                 "completed_at": str(entry.completed_at) if entry.completed_at else None,
-                "size": entry.size,
+                "size_gb": entry.size,
             }
             inc_base = getattr(entry, "incremental_base_backup_id", None)
             if inc_base:
@@ -191,8 +191,8 @@ class BackupManager:
                             row["status"],
                             cols_str,
                             row["started_at"] or "-",
-                            f"{row['size']:.4f}"
-                            if isinstance(row["size"], (int, float))
+                            f"{row['size_gb']:.4f}"
+                            if isinstance(row["size_gb"], (int, float))
                             else "-",
                         ]
                     )
@@ -380,11 +380,12 @@ class BackupManager:
         if backup_location is not None:
             status_kwargs["backup_location"] = backup_location
         backup = get_status(**status_kwargs)
+        status_val = str(getattr(backup.status, "value", backup.status))
         if json_output:
             data: dict[str, str | list[str]] = {
                 "backup_id": backup.backup_id,
                 "path": backup.path,
-                "status": str(backup.status),
+                "status": status_val,
             }
             if isinstance(backup, BackupReturn):
                 data["collections"] = backup.collections
@@ -392,7 +393,7 @@ class BackupManager:
         else:
             click.echo(f"Backup ID: {backup.backup_id}")
             click.echo(f"Backup Path: {backup.path}")
-            click.echo(f"Backup Status: {backup.status}")
+            click.echo(f"Backup Status: {status_val}")
             if isinstance(backup, BackupReturn):
                 click.echo(f"Collections: {backup.collections}")
 
@@ -448,6 +449,9 @@ class BackupManager:
             if backup_location is not None:
                 status_kwargs["backup_location"] = backup_location
             backup_status = status_fn(**status_kwargs)
+            status_val = str(
+                getattr(backup_status.status, "value", backup_status.status)
+            )
             raise Exception(
-                f"Error: {action_label} '{backup_id}' could not be cancelled in Weaviate. Current status: {backup_status.status}"
+                f"Error: {action_label} '{backup_id}' could not be cancelled in Weaviate. Current status: {status_val}"
             )

@@ -42,7 +42,7 @@ class ShardManager:
                         {
                             "name": getattr(shard, "name", "N/A"),
                             "status": str(getattr(shard, "status", "N/A")),
-                            "vector_queue_size": getattr(
+                            "vector_queue_length": getattr(
                                 shard, "vector_queue_size", None
                             ),
                         }
@@ -75,7 +75,7 @@ class ShardManager:
                             {
                                 "name": getattr(shard, "name", "N/A"),
                                 "status": str(getattr(shard, "status", "N/A")),
-                                "vector_queue_size": getattr(
+                                "vector_queue_length": getattr(
                                     shard, "vector_queue_size", None
                                 ),
                             }
